@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <title>DistSys Mermaid Quick Test Page</title>
+    <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgo=" />
+    <style>
+      div.mermaid {
+        font-family: 'Courier New', Courier, monospace !important;
+      }
+    </style>
+  </head>
+
+  <body>
+    <h1>DistSys diagram demo</h1>
+    <p>
+      One service, one hub, one event: <code>mermaid.run()</code> calls
+      <code>bindFunctions</code> automatically once each SVG below is inserted, so the orbs start
+      streaming with no extra wiring.
+    </p>
+
+    <h2>Basic stream</h2>
+    <pre class="mermaid">
+distsys-beta
+service:
+  id: orders
+  label: Order Service
+hub:
+  id: bus
+  label: Event Hub
+event:
+  id: order-created
+  label: OrderCreated
+  interval: 300
+    </pre>
+    <hr />
+
+    <h2>Slower interval</h2>
+    <pre class="mermaid">
+distsys-beta
+service:
+  id: payments
+  label: Payment Service
+hub:
+  id: bus
+  label: Event Hub
+event:
+  id: payment-captured
+  label: PaymentCaptured
+  interval: 1500
+    </pre>
+    <hr />
+
+    <h2>Controlling the stream from the page</h2>
+    <p>
+      <code>mermaidAPI.render()</code> returns <code>bindFunctions</code>; calling it on the live
+      SVG attaches a <code>.distSys</code> controller with <code>play()</code>,
+      <code>pause()</code>, and <code>stop()</code>.
+    </p>
+    <div id="controlledDiagram"></div>
+    <button id="btnPlay">play</button>
+    <button id="btnPause">pause</button>
+    <button id="btnStop">stop</button>
+
+    <script type="module">
+      import mermaid from './mermaid.esm.mjs';
+      mermaid.initialize({ startOnLoad: true, logLevel: 3, securityLevel: 'loose' });
+
+      const src = `distsys-beta
+service:
+  id: inventory
+  label: Inventory Service
+hub:
+  id: bus
+  label: Event Hub
+event:
+  id: stock-reserved
+  label: StockReserved
+  interval: 500
+`;
+      const { svg, bindFunctions } = await mermaid.mermaidAPI.render('controlledGraph', src);
+      const mount = document.getElementById('controlledDiagram');
+      mount.innerHTML = svg;
+      const svgEl = mount.querySelector('svg');
+      bindFunctions?.(svgEl);
+
+      document.getElementById('btnPlay').addEventListener('click', () => svgEl.distSys.play());
+      document.getElementById('btnPause').addEventListener('click', () => svgEl.distSys.pause());
+      document.getElementById('btnStop').addEventListener('click', () => svgEl.distSys.stop());
+    </script>
+  </body>
+</html>
