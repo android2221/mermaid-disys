@@ -11,7 +11,8 @@ export interface DistSysHub {
 export interface DistSysEvent {
   id: string;
   label: string;
-  /** Milliseconds between successive emissions of this event from the service to the hub. */
+  /** Milliseconds the hub holds the event before the service sends the next one. Only one
+   * orb travels at a time. */
   interval: number;
   /** Whether the connecting line is drawn. The orbs travel along the route either way. */
   showPath: boolean;

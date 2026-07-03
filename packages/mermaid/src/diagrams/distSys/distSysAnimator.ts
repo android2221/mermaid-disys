@@ -2,7 +2,7 @@ export interface DistSysAnimationController {
   play(): void;
   pause(): void;
   stop(): void;
-  /** Shows/hides the connecting line without affecting the orbs traveling along it. */
+  /** Shows/hides the connecting line without affecting the orb traveling along it. */
   setPathVisible(visible: boolean): void;
   /** Flips the current line visibility; returns the new state. */
   togglePath(): boolean;
@@ -13,22 +13,19 @@ export interface AttachDistSysAnimationOptions {
   svg: SVGSVGElement;
   /** CSS selector, scoped to `svg`, for the `<path>` the orb travels along. */
   pathSelector: string;
-  /** CSS selector, scoped to `svg`, for the `<g>` that newly-spawned orbs are appended to. */
+  /** CSS selector, scoped to `svg`, for the `<g>` the orb is appended to. */
   tokenGroupSelector: string;
-  /** Milliseconds between successive orbs entering the path. */
+  /** Milliseconds the orb waits at the hub before the next one departs the service. */
   interval: number;
   /** Milliseconds an orb takes to travel from one end of the path to the other. */
   travelDuration: number;
   tokenRadius: number;
   tokenClass: string;
-  /** Whether the connecting line is visible on attach. The orbs travel along it either way. */
+  /** Whether the connecting line is visible on attach. The orb travels along it either way. */
   pathVisible: boolean;
 }
 
-interface ActiveToken {
-  el: SVGCircleElement;
-  start: number;
-}
+type Phase = 'traveling' | 'waiting';
 
 const NOOP_CONTROLLER: DistSysAnimationController = {
   play() {
@@ -43,9 +40,9 @@ const NOOP_CONTROLLER: DistSysAnimationController = {
 };
 
 /**
- * Drives a repeating stream of "event" orbs along an already-rendered SVG path.
- * Pure DOM + rAF — no dependency on mermaid internals beyond the two elements it's given,
- * so it works regardless of how the caller chose to mount the SVG into the page.
+ * Drives a single "event" orb, one at a time, along an already-rendered SVG path: travel,
+ * then a gap, then the next orb departs. Pure DOM + rAF — no dependency on mermaid internals
+ * beyond the two elements it's given, so it works regardless of how the caller mounted the SVG.
  */
 export function attachDistSysAnimation(
   options: AttachDistSysAnimationOptions
@@ -68,14 +65,18 @@ export function attachDistSysAnimation(
   }
 
   // The line is purely visual — hiding it never touches the path's geometry, so
-  // getPointAtLength keeps working and the orbs keep flowing along the same route.
+  // getPointAtLength keeps working and the orb keeps flowing along the same route.
   let lineVisible = pathVisible;
   path.style.visibility = lineVisible ? '' : 'hidden';
 
   const totalLength = path.getTotalLength();
-  const activeTokens = new Set<ActiveToken>();
 
-  let spawnTimer: ReturnType<typeof setInterval> | undefined;
+  let currentTokenEl: SVGCircleElement | null = null;
+  let phase: Phase = 'waiting';
+  // performance.now() timestamp the current phase began; elapsed time within a phase is
+  // always measured from here, so pausing/resuming only has to shift this one number.
+  let phaseStart = 0;
+  let playing = false;
   let rafId: number | undefined;
   let pausedAt: number | undefined;
 
@@ -87,60 +88,68 @@ export function attachDistSysAnimation(
     el.setAttribute('cx', String(origin.x));
     el.setAttribute('cy', String(origin.y));
     tokenGroup.appendChild(el);
-    activeTokens.add({ el, start: performance.now() });
+    currentTokenEl = el;
   };
 
   const tick = (now: number) => {
-    activeTokens.forEach((token) => {
-      const t = (now - token.start) / travelDuration;
+    if (phase === 'traveling' && currentTokenEl) {
+      const t = (now - phaseStart) / travelDuration;
       if (t >= 1) {
-        token.el.remove();
-        activeTokens.delete(token);
-        return;
+        currentTokenEl.remove();
+        currentTokenEl = null;
+        phase = 'waiting';
+        phaseStart = now;
+      } else {
+        const point = path.getPointAtLength(t * totalLength);
+        currentTokenEl.setAttribute('cx', String(point.x));
+        currentTokenEl.setAttribute('cy', String(point.y));
       }
-      const point = path.getPointAtLength(t * totalLength);
-      token.el.setAttribute('cx', String(point.x));
-      token.el.setAttribute('cy', String(point.y));
-    });
+    } else if (phase === 'waiting' && now - phaseStart >= interval) {
+      spawnToken();
+      phase = 'traveling';
+      phaseStart = now;
+    }
     rafId = requestAnimationFrame(tick);
   };
 
   const play = () => {
-    if (spawnTimer !== undefined) {
-      return; // already playing
+    if (playing) {
+      return;
     }
+    playing = true;
     if (pausedAt !== undefined) {
-      // Shift every in-flight token's clock forward by however long we were paused,
-      // so it resumes from where it visually stopped instead of jumping ahead.
-      const delta = performance.now() - pausedAt;
-      activeTokens.forEach((token) => {
-        token.start += delta;
-      });
+      // Shift the current phase's clock forward by however long we were paused, so it
+      // resumes from where it visually stopped instead of jumping ahead.
+      phaseStart += performance.now() - pausedAt;
       pausedAt = undefined;
     } else {
       spawnToken();
+      phase = 'traveling';
+      phaseStart = performance.now();
     }
-    spawnTimer = setInterval(spawnToken, interval);
     rafId = requestAnimationFrame(tick);
   };
 
   const pause = () => {
-    if (spawnTimer !== undefined) {
-      clearInterval(spawnTimer);
-      spawnTimer = undefined;
+    if (!playing) {
+      return;
     }
+    playing = false;
     if (rafId !== undefined) {
       cancelAnimationFrame(rafId);
       rafId = undefined;
-      pausedAt = performance.now();
     }
+    pausedAt = performance.now();
   };
 
   const stop = () => {
     pause();
     pausedAt = undefined;
-    activeTokens.forEach((token) => token.el.remove());
-    activeTokens.clear();
+    phase = 'waiting';
+    if (currentTokenEl) {
+      currentTokenEl.remove();
+      currentTokenEl = null;
+    }
   };
 
   const setPathVisible = (visible: boolean) => {

@@ -172,7 +172,7 @@ describe('distSys animator', () => {
     vi.advanceTimersByTime(0);
   });
 
-  it('removes tokens once they finish traveling and stop() clears everything', () => {
+  it('stop() clears the in-flight orb', () => {
     const { svg, tokens } = makeSvg(100);
     const controller = attachDistSysAnimation({
       svg,
@@ -189,6 +189,63 @@ describe('distSys animator', () => {
     expect(tokens.children.length).toBe(1);
     controller.stop();
     expect(tokens.children.length).toBe(0);
+  });
+
+  it('never shows more than one orb at a time, even with a short interval', () => {
+    const { svg, tokens } = makeSvg(100);
+    const controller = attachDistSysAnimation({
+      svg,
+      pathSelector: '#p',
+      tokenGroupSelector: '#tokens',
+      interval: 20,
+      travelDuration: 100,
+      tokenRadius: 5,
+      tokenClass: 'token',
+      pathVisible: true,
+    });
+
+    controller.play();
+    let maxConcurrent = tokens.children.length;
+    for (let i = 0; i < 40; i++) {
+      vi.advanceTimersByTime(10);
+      maxConcurrent = Math.max(maxConcurrent, tokens.children.length);
+    }
+    expect(maxConcurrent).toBe(1);
+  });
+
+  it('waits `interval` ms after an orb arrives before the next one departs', () => {
+    const { svg, tokens } = makeSvg(100);
+    const controller = attachDistSysAnimation({
+      svg,
+      pathSelector: '#p',
+      tokenGroupSelector: '#tokens',
+      interval: 50,
+      travelDuration: 100,
+      tokenRadius: 5,
+      tokenClass: 'token',
+      pathVisible: true,
+    });
+
+    controller.play();
+    expect(tokens.children.length).toBe(1); // first orb departs immediately
+
+    // Poll in small steps rather than jumping straight to a computed boundary — the exact
+    // instant rAF fires under fake timers isn't guaranteed, so sample frequently instead.
+    let sawGap = false;
+    for (let elapsed = 0; elapsed < 130; elapsed += 5) {
+      vi.advanceTimersByTime(5);
+      if (tokens.children.length === 0) {
+        sawGap = true;
+      }
+    }
+    expect(sawGap).toBe(true); // the orb arrived and the gap before the next one actually happened
+
+    for (let elapsed = 0; elapsed < 100; elapsed += 5) {
+      vi.advanceTimersByTime(5);
+    }
+    // Well past travelDuration + interval (150ms) from the first departure: the next orb
+    // has departed and is still mid-flight (its own travelDuration doesn't end until 250ms).
+    expect(tokens.children.length).toBe(1);
   });
 
   it('returns a no-op controller when the path or token group is missing', () => {
