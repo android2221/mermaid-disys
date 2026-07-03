@@ -26,6 +26,7 @@
     "build:coverage": "MERMAID_COVERAGE=true pnpm build:esbuild",
     "build:mermaid:full": "pnpm clean && pnpm build:mermaid && pnpm copy:editor && pnpm copy:mermaid && pnpm copy:dompurify && pnpm serve:dist",
     "build:viz": "pnpm build:esbuild --visualize",
+    "render:html": "pnpm --filter mermaid render:html",
     "swimlanes:size": "tsx scripts/swimlanes-size.ts",
     "swimlanes:size:baseline": "tsx scripts/swimlanes-size.ts --write-baseline",
     "swimlanes:size:compare": "tsx scripts/swimlanes-size.ts --compare",
