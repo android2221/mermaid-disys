@@ -36,7 +36,12 @@ event:
     await parser.parse(input);
     expect(db.getService()).toEqual({ id: 'orders', label: 'Order Service' });
     expect(db.getHub()).toEqual({ id: 'bus', label: 'Event Hub' });
-    expect(db.getEvent()).toEqual({ id: 'order-created', label: 'OrderCreated', interval: 500 });
+    expect(db.getEvent()).toEqual({
+      id: 'order-created',
+      label: 'OrderCreated',
+      interval: 500,
+      showPath: true,
+    });
   });
 
   it('defaults label to id and interval to 1000ms when omitted', async () => {
@@ -51,7 +56,39 @@ event:
     await parser.parse(input);
     expect(db.getService()).toEqual({ id: 'orders', label: 'orders' });
     expect(db.getHub()).toEqual({ id: 'bus', label: 'bus' });
-    expect(db.getEvent()).toEqual({ id: 'order-created', label: 'order-created', interval: 1000 });
+    expect(db.getEvent()).toEqual({
+      id: 'order-created',
+      label: 'order-created',
+      interval: 1000,
+      showPath: true,
+    });
+  });
+
+  it('parses event.showPath', async () => {
+    const input = `distsys-beta
+service:
+  id: orders
+hub:
+  id: bus
+event:
+  id: order-created
+  showPath: false
+`;
+    await parser.parse(input);
+    expect(db.getEvent()?.showPath).toBe(false);
+  });
+
+  it('throws when event.showPath is not a boolean', async () => {
+    const input = `distsys-beta
+service:
+  id: orders
+hub:
+  id: bus
+event:
+  id: order-created
+  showPath: yes
+`;
+    await expect(parser.parse(input)).rejects.toThrow(/showPath/);
   });
 
   it('throws when service.id is missing', async () => {
@@ -124,6 +161,7 @@ describe('distSys animator', () => {
       travelDuration: 100,
       tokenRadius: 5,
       tokenClass: 'token',
+      pathVisible: true,
     });
 
     controller.play();
@@ -144,6 +182,7 @@ describe('distSys animator', () => {
       travelDuration: 50,
       tokenRadius: 5,
       tokenClass: 'token',
+      pathVisible: true,
     });
 
     controller.play();
@@ -162,9 +201,40 @@ describe('distSys animator', () => {
       travelDuration: 100,
       tokenRadius: 5,
       tokenClass: 'token',
+      pathVisible: true,
     });
     expect(() => controller.play()).not.toThrow();
     expect(() => controller.pause()).not.toThrow();
     expect(() => controller.stop()).not.toThrow();
+    expect(() => controller.setPathVisible(false)).not.toThrow();
+    expect(controller.togglePath()).toBe(false);
+  });
+
+  it('hides the line without stopping the orbs, and starts hidden when pathVisible is false', () => {
+    const { svg, path } = makeSvg(100);
+    const controller = attachDistSysAnimation({
+      svg,
+      pathSelector: '#p',
+      tokenGroupSelector: '#tokens',
+      interval: 1000,
+      travelDuration: 200,
+      tokenRadius: 5,
+      tokenClass: 'token',
+      pathVisible: false,
+    });
+
+    expect(path.style.visibility).toBe('hidden');
+    controller.play();
+
+    controller.setPathVisible(true);
+    expect(path.style.visibility).toBe('');
+
+    const nowVisible = controller.togglePath();
+    expect(nowVisible).toBe(false);
+    expect(path.style.visibility).toBe('hidden');
+
+    // Toggling the line doesn't touch the animation loop or the orb itself.
+    vi.advanceTimersByTime(100);
+    vi.advanceTimersByTime(0);
   });
 });

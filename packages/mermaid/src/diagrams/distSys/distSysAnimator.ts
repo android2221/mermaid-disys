@@ -2,6 +2,10 @@ export interface DistSysAnimationController {
   play(): void;
   pause(): void;
   stop(): void;
+  /** Shows/hides the connecting line without affecting the orbs traveling along it. */
+  setPathVisible(visible: boolean): void;
+  /** Flips the current line visibility; returns the new state. */
+  togglePath(): boolean;
 }
 
 export interface AttachDistSysAnimationOptions {
@@ -17,6 +21,8 @@ export interface AttachDistSysAnimationOptions {
   travelDuration: number;
   tokenRadius: number;
   tokenClass: string;
+  /** Whether the connecting line is visible on attach. The orbs travel along it either way. */
+  pathVisible: boolean;
 }
 
 interface ActiveToken {
@@ -30,6 +36,10 @@ const NOOP_CONTROLLER: DistSysAnimationController = {
   },
   pause() {},
   stop() {},
+  setPathVisible() {},
+  togglePath() {
+    return false;
+  },
 };
 
 /**
@@ -40,14 +50,27 @@ const NOOP_CONTROLLER: DistSysAnimationController = {
 export function attachDistSysAnimation(
   options: AttachDistSysAnimationOptions
 ): DistSysAnimationController {
-  const { svg, pathSelector, tokenGroupSelector, interval, travelDuration, tokenRadius, tokenClass } =
-    options;
+  const {
+    svg,
+    pathSelector,
+    tokenGroupSelector,
+    interval,
+    travelDuration,
+    tokenRadius,
+    tokenClass,
+    pathVisible,
+  } = options;
 
   const path = svg.querySelector<SVGPathElement>(pathSelector);
   const tokenGroup = svg.querySelector<SVGGElement>(tokenGroupSelector);
   if (!path || !tokenGroup) {
     return NOOP_CONTROLLER;
   }
+
+  // The line is purely visual — hiding it never touches the path's geometry, so
+  // getPointAtLength keeps working and the orbs keep flowing along the same route.
+  let lineVisible = pathVisible;
+  path.style.visibility = lineVisible ? '' : 'hidden';
 
   const totalLength = path.getTotalLength();
   const activeTokens = new Set<ActiveToken>();
@@ -120,5 +143,15 @@ export function attachDistSysAnimation(
     activeTokens.clear();
   };
 
-  return { play, pause, stop };
+  const setPathVisible = (visible: boolean) => {
+    lineVisible = visible;
+    path.style.visibility = lineVisible ? '' : 'hidden';
+  };
+
+  const togglePath = () => {
+    setPathVisible(!lineVisible);
+    return lineVisible;
+  };
+
+  return { play, pause, stop, setPathVisible, togglePath };
 }

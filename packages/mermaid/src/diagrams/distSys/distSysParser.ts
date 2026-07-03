@@ -12,6 +12,7 @@ interface DistSysYamlNode {
 
 interface DistSysYamlEvent extends DistSysYamlNode {
   interval?: unknown;
+  showPath?: unknown;
 }
 
 interface DistSysYamlDoc {
@@ -79,8 +80,14 @@ export const parser: ParserDefinition = {
       throw new Error('distsys diagram requires `event.interval` to be a positive number of milliseconds');
     }
 
+    const rawShowPath = doc.event?.showPath;
+    if (rawShowPath !== undefined && typeof rawShowPath !== 'boolean') {
+      throw new Error('distsys diagram requires `event.showPath` to be a boolean');
+    }
+    const showPath = rawShowPath ?? true;
+
     db.setService({ id: serviceId, label: labelOf(doc.service, serviceId) });
     db.setHub({ id: hubId, label: labelOf(doc.hub, hubId) });
-    db.setEvent({ id: eventId, label: labelOf(doc.event, eventId), interval });
+    db.setEvent({ id: eventId, label: labelOf(doc.event, eventId), interval, showPath });
   },
 };

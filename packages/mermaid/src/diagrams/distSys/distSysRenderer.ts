@@ -5,13 +5,16 @@ import { configureSvgSize } from '../../setupGraphViewbox.js';
 import { attachDistSysAnimation } from './distSysAnimator.js';
 import type { DistSysDB } from './distSysDb.js';
 
-const HEIGHT = 200;
+const MARGIN_X = 60;
+const MARGIN_Y = 36;
+const HUB_HEIGHT = 48;
+const HUB_OVERHANG_X = 24;
+const MIN_HUB_WIDTH = 160;
 const NODE_HEIGHT = 70;
 const MIN_NODE_WIDTH = 120;
 const NODE_TEXT_PADDING_X = 28;
-const MARGIN_X = 60;
-const MIN_GAP = 70;
-const LABEL_PADDING_X = 24;
+const GAP_Y = 90;
+const LABEL_OFFSET_X = 14;
 const TOKEN_RADIUS = 7;
 const TRAVEL_DURATION_MS = 900;
 
@@ -38,8 +41,6 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
   }
 
   const svg: SVG = selectSvgElement(id);
-  const nodeY = (HEIGHT - NODE_HEIGHT) / 2;
-  const portY = nodeY + NODE_HEIGHT / 2;
 
   const markerId = `${id}-distsys-arrow`;
   const pathId = `${id}-distsys-event-path`;
@@ -59,8 +60,8 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     .attr('d', 'M 0 0 L 10 5 L 0 10 z')
     .attr('class', 'distsys-arrow');
 
-  // Text is measured before anything is positioned, so node widths and the service->hub
-  // gap can grow to fit arbitrarily long labels instead of the hub shape painting over them.
+  // Text is measured before anything is positioned, so the hub bar, the service box, and
+  // the overall canvas can all grow to fit arbitrarily long labels.
   const serviceG = svg.append('g').attr('class', 'distsys-node distsys-service');
   const serviceText = serviceG
     .append('text')
@@ -76,49 +77,70 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     .text(hub.label);
 
   const pathG = svg.append('g').attr('class', 'distsys-path');
-  const labelText = pathG.append('text').attr('text-anchor', 'middle').attr('class', 'distsys-edge-label').text(event.label);
+  const labelText = pathG
+    .append('text')
+    .attr('text-anchor', 'start')
+    .attr('dominant-baseline', 'middle')
+    .attr('class', 'distsys-edge-label')
+    .text(event.label);
 
   const serviceWidth = Math.max(
     MIN_NODE_WIDTH,
     measureWidth(serviceText.node()!) + NODE_TEXT_PADDING_X
   );
-  const hubWidth = Math.max(MIN_NODE_WIDTH, measureWidth(hubText.node()!) + NODE_TEXT_PADDING_X);
-  const gap = Math.max(MIN_GAP, measureWidth(labelText.node()!) + LABEL_PADDING_X * 2);
+  // The hub is a long bar sized to span the service(s) beneath it, widening further if its
+  // own label needs more room.
+  const hubWidth = Math.max(
+    MIN_HUB_WIDTH,
+    serviceWidth + HUB_OVERHANG_X * 2,
+    measureWidth(hubText.node()!) + NODE_TEXT_PADDING_X
+  );
+  const labelWidth = measureWidth(labelText.node()!);
 
-  const serviceX = MARGIN_X;
-  const servicePort = { x: serviceX + serviceWidth, y: portY };
-  const hubX = servicePort.x + gap;
-  const hubPort = { x: hubX, y: portY };
-  const width = hubX + hubWidth + MARGIN_X;
+  const maxNodeWidth = Math.max(hubWidth, serviceWidth);
+  const centerX = MARGIN_X + maxNodeWidth / 2;
+  const rightExtent = Math.max(maxNodeWidth / 2, LABEL_OFFSET_X + labelWidth);
+  const width = centerX + rightExtent + MARGIN_X;
 
-  svg.attr('viewBox', `0 0 ${width} ${HEIGHT}`);
-  configureSvgSize(svg, HEIGHT, width, db.getConfig().useMaxWidth);
+  const hubX = centerX - hubWidth / 2;
+  const hubY = MARGIN_Y;
+  const hubBottom = hubY + HUB_HEIGHT;
 
+  const serviceX = centerX - serviceWidth / 2;
+  const serviceY = hubBottom + GAP_Y;
+  const serviceCenterY = serviceY + NODE_HEIGHT / 2;
+
+  const height = serviceY + NODE_HEIGHT + MARGIN_Y;
+
+  svg.attr('viewBox', `0 0 ${width} ${height}`);
+  configureSvgSize(svg, height, width, db.getConfig().useMaxWidth);
+
+  // Orbs travel bottom-to-top: the service emits up into the hub.
   pathG
     .insert('path', 'text')
     .attr('id', pathId)
-    .attr('d', `M${servicePort.x},${servicePort.y} L${hubPort.x},${hubPort.y}`)
+    .attr('d', `M${centerX},${serviceY} L${centerX},${hubBottom}`)
     .attr('marker-end', `url(#${markerId})`)
     .attr('class', 'distsys-edge');
-  labelText.attr('x', (servicePort.x + hubPort.x) / 2).attr('y', portY - 12);
-
-  serviceG
-    .insert('rect', 'text')
-    .attr('x', serviceX)
-    .attr('y', nodeY)
-    .attr('width', serviceWidth)
-    .attr('height', NODE_HEIGHT)
-    .attr('rx', 6);
-  serviceText.attr('x', serviceX + serviceWidth / 2).attr('y', portY);
+  labelText.attr('x', centerX + LABEL_OFFSET_X).attr('y', (hubBottom + serviceY) / 2);
 
   hubG
     .insert('rect', 'text')
     .attr('x', hubX)
-    .attr('y', nodeY)
+    .attr('y', hubY)
     .attr('width', hubWidth)
+    .attr('height', HUB_HEIGHT)
+    .attr('rx', 8);
+  hubText.attr('x', hubX + hubWidth / 2).attr('y', hubY + HUB_HEIGHT / 2);
+
+  serviceG
+    .insert('rect', 'text')
+    .attr('x', serviceX)
+    .attr('y', serviceY)
+    .attr('width', serviceWidth)
     .attr('height', NODE_HEIGHT)
-    .attr('rx', NODE_HEIGHT / 2);
-  hubText.attr('x', hubX + hubWidth / 2).attr('y', portY);
+    .attr('rx', 6);
+  serviceText.attr('x', serviceX + serviceWidth / 2).attr('y', serviceCenterY);
 
   svg.append('g').attr('class', 'distsys-tokens').attr('id', tokensId);
 
@@ -140,8 +162,9 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
       travelDuration: TRAVEL_DURATION_MS,
       tokenRadius: TOKEN_RADIUS,
       tokenClass: 'distsys-token',
+      pathVisible: event.showPath,
     });
-    // Exposed so page code can do `svgEl.distSys.pause()` / `.play()` / `.stop()`.
+    // Exposed so page code can do `svgEl.distSys.pause()` / `.play()` / `.setPathVisible()` / etc.
     (svgEl as unknown as { distSys: typeof controller }).distSys = controller;
     controller.play();
   };

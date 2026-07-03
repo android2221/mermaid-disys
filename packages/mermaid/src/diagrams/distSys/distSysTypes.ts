@@ -13,4 +13,6 @@ export interface DistSysEvent {
   label: string;
   /** Milliseconds between successive emissions of this event from the service to the hub. */
   interval: number;
+  /** Whether the connecting line is drawn. The orbs travel along the route either way. */
+  showPath: boolean;
 }

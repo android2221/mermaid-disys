@@ -52,16 +52,35 @@ event:
     </pre>
     <hr />
 
+    <h2>Line hidden, orbs still flow (<code>event.showPath: false</code>)</h2>
+    <pre class="mermaid">
+distsys-beta
+service:
+  id: analytics
+  label: Analytics Service
+hub:
+  id: bus
+  label: Event Hub
+event:
+  id: page-viewed
+  label: PageViewed
+  interval: 400
+  showPath: false
+    </pre>
+    <hr />
+
     <h2>Controlling the stream from the page</h2>
     <p>
       <code>mermaidAPI.render()</code> returns <code>bindFunctions</code>; calling it on the live
       SVG attaches a <code>.distSys</code> controller with <code>play()</code>,
-      <code>pause()</code>, and <code>stop()</code>.
+      <code>pause()</code>, <code>stop()</code>, and <code>setPathVisible()</code> /
+      <code>togglePath()</code> for the connecting line.
     </p>
     <div id="controlledDiagram"></div>
     <button id="btnPlay">play</button>
     <button id="btnPause">pause</button>
     <button id="btnStop">stop</button>
+    <button id="btnTogglePath">toggle line</button>
 
     <script type="module">
       import mermaid from './mermaid.esm.mjs';
@@ -88,6 +107,9 @@ event:
       document.getElementById('btnPlay').addEventListener('click', () => svgEl.distSys.play());
       document.getElementById('btnPause').addEventListener('click', () => svgEl.distSys.pause());
       document.getElementById('btnStop').addEventListener('click', () => svgEl.distSys.stop());
+      document
+        .getElementById('btnTogglePath')
+        .addEventListener('click', () => svgEl.distSys.togglePath());
     </script>
   </body>
 </html>
