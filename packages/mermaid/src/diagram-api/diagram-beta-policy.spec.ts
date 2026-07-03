@@ -72,6 +72,7 @@ const BETA_KEYWORD_OVERRIDES: Record<string, string> = {
   railroadEbnf: 'railroad-ebnf-beta',
   railroadAbnf: 'railroad-abnf-beta',
   railroadPeg: 'railroad-peg-beta',
+  distSys: 'distsys-beta',
 };
 
 describe('diagram beta policy', () => {
