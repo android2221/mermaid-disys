@@ -135,9 +135,19 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
   );
   const labelWidths = eventLabelTexts.map((text) => measureWidth(text.node()!));
 
-  // Gaps between adjacent services are a fixed width — service<->service labels render below
-  // the row (not in the gap itself), so the gap only needs to fit the connecting line.
+  // Gaps between adjacent services default to SERVICE_GAP_X, but any gap a direct
+  // service<->service event connects is widened to fit the widest such event's label, so the
+  // connecting line (and the label centered beneath it) is never narrower than its own text.
   const gaps = new Array(Math.max(services.length - 1, 0)).fill(SERVICE_GAP_X);
+  eventEnds.forEach(({ fromEnd, toEnd }, i) => {
+    if (fromEnd.kind === 'service' && toEnd.kind === 'service') {
+      const lo = Math.min(fromEnd.index, toEnd.index);
+      const hi = Math.max(fromEnd.index, toEnd.index);
+      if (hi === lo + 1) {
+        gaps[lo] = Math.max(gaps[lo], labelWidths[i] + NODE_TEXT_PADDING_X);
+      }
+    }
+  });
 
   const servicesWidth =
     serviceWidths.reduce((sum, w) => sum + w, 0) + gaps.reduce((sum, g) => sum + g, 0);
