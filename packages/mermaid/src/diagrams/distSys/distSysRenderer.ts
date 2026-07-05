@@ -15,12 +15,11 @@ const MIN_NODE_WIDTH = 120;
 const NODE_TEXT_PADDING_X = 28;
 const SERVICE_GAP_X = 48;
 const GAP_Y = 90;
-const LABEL_BELOW_GAP = 16;
 const LABEL_ROW_HEIGHT = 20;
 const LABEL_TEXT_HALF_HEIGHT = 7;
 const PARALLEL_OFFSET = 16;
 const ROW_LINE_TO_LABEL_GAP = 14;
-const ROW_HEIGHT = 32;
+const ROW_SPACING = 32;
 const TOKEN_RADIUS = 7;
 const TRAVEL_DURATION_MS = 900;
 
@@ -210,42 +209,25 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
         labelRight: cx + labelWidth / 2,
       };
     }
-    // Service<->service: a direct horizontal line between the two boxes' facing sides. Routes
-    // straight through any boxes in between if the two services aren't neighbors.
+    // Service<->service: a direct horizontal line between the two boxes' facing sides, staying
+    // within their shared row (the gap between two adjacent boxes has no other content in it,
+    // so the line and its label can live there without touching either box's own text) —
+    // keeping it visually between the services rather than relocated elsewhere. Events sharing
+    // this connector spread out around the row's center; each one's label sits directly below
+    // its own line, so scanning down reads as line, label, line, label.
     const fromBox = serviceBoxes[(fromEnd as { index: number }).index];
     const toBox = serviceBoxes[(toEnd as { index: number }).index];
     const goesRight = fromBox.centerX < toBox.centerX;
     const startX = goesRight ? fromBox.x + fromBox.width : fromBox.x;
     const endX = goesRight ? toBox.x : toBox.x + toBox.width;
     const labelX = (startX + endX) / 2;
-
-    if (groupSize === 1) {
-      // The one event on this connector runs straight through the boxes' vertical center, with
-      // its label directly beneath the whole row.
-      const y = serviceCenterY;
-      const labelY = serviceY + NODE_HEIGHT + LABEL_BELOW_GAP;
-      return {
-        startX,
-        endX,
-        startY: y,
-        endY: y,
-        labelX,
-        labelY,
-        labelAnchor: 'middle' as const,
-        labelLeft: labelX - labelWidth / 2,
-        labelRight: labelX + labelWidth / 2,
-      };
-    }
-    // Multiple events share this connector: rather than clustering every line together
-    // followed by every label, each event gets its own row below the service row — its line,
-    // then its label directly beneath it, then the next event's line, then its label.
-    const rowY = serviceY + NODE_HEIGHT + LABEL_BELOW_GAP + indexInGroup * ROW_HEIGHT;
-    const labelY = rowY + ROW_LINE_TO_LABEL_GAP;
+    const y = serviceCenterY + centered * ROW_SPACING;
+    const labelY = y + ROW_LINE_TO_LABEL_GAP;
     return {
       startX,
       endX,
-      startY: rowY,
-      endY: rowY,
+      startY: y,
+      endY: y,
       labelX,
       labelY,
       labelAnchor: 'middle' as const,
