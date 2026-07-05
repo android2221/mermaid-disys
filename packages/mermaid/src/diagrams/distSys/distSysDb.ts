@@ -13,7 +13,7 @@ import type { DistSysEvent, DistSysHub, DistSysService } from './distSysTypes.js
 export class DistSysDB implements DiagramDB {
   private services: DistSysService[] = [];
   private hub?: DistSysHub;
-  private event?: DistSysEvent;
+  private events: DistSysEvent[] = [];
   private diagramId = '';
 
   /** Set by the renderer once it knows the live DOM ids to animate; invoked by the caller after inserting the SVG. */
@@ -26,7 +26,7 @@ export class DistSysDB implements DiagramDB {
   public clear(): void {
     this.services = [];
     this.hub = undefined;
-    this.event = undefined;
+    this.events = [];
     this.diagramId = '';
     this.bindFunctions = undefined;
     commonClear();
@@ -56,12 +56,12 @@ export class DistSysDB implements DiagramDB {
     return this.hub;
   }
 
-  public setEvent(event: DistSysEvent): void {
-    this.event = event;
+  public setEvents(events: DistSysEvent[]): void {
+    this.events = events;
   }
 
-  public getEvent(): DistSysEvent | undefined {
-    return this.event;
+  public getEvents(): DistSysEvent[] {
+    return this.events;
   }
 
   public getConfig(): { useMaxWidth: boolean } {

@@ -20,7 +20,7 @@ interface DistSysYamlEvent extends DistSysYamlNode {
 interface DistSysYamlDoc {
   services?: unknown;
   hub?: DistSysYamlNode;
-  event?: DistSysYamlEvent;
+  events?: unknown;
 }
 
 const requireId = (node: DistSysYamlNode | undefined, field: string): string => {
@@ -68,6 +68,68 @@ const requireIds = (value: unknown, field: string): string[] => {
   });
 };
 
+interface ParsedDistSysEvent {
+  id: string;
+  label: string;
+  interval: number;
+  showPath: boolean;
+  from: string[];
+  to: string[];
+}
+
+/** `events` is a YAML sequence of event blocks; each one's `from`/`to` must reference known ids. */
+const parseEvents = (value: unknown, knownIds: Set<string>): ParsedDistSysEvent[] => {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(
+      'distsys diagram requires `events` to be a non-empty list, e.g.\n' +
+        'events:\n  - id: order-created\n    label: OrderCreated\n    from: orders\n    to: bus'
+    );
+  }
+  const seenIds = new Set<string>();
+  return value.map((raw, index) => {
+    const node = raw as DistSysYamlEvent | undefined;
+    const id = requireId(node, `events[${index}]`);
+    if (seenIds.has(id)) {
+      throw new Error(`distsys diagram requires every \`events[].id\` to be unique (duplicate: \`${id}\`)`);
+    }
+    seenIds.add(id);
+
+    const rawInterval = node?.interval;
+    const interval =
+      rawInterval === undefined || rawInterval === null ? DEFAULT_INTERVAL_MS : Number(rawInterval);
+    if (!Number.isFinite(interval) || interval <= 0) {
+      throw new Error(
+        `distsys diagram requires \`events[${index}].interval\` to be a positive number of milliseconds`
+      );
+    }
+
+    const rawShowPath = node?.showPath;
+    if (rawShowPath !== undefined && typeof rawShowPath !== 'boolean') {
+      throw new Error(`distsys diagram requires \`events[${index}].showPath\` to be a boolean`);
+    }
+    const showPath = rawShowPath ?? true;
+
+    const from = requireIds(node?.from, `events[${index}].from`);
+    const to = requireIds(node?.to, `events[${index}].to`);
+    for (const refId of [...from, ...to]) {
+      if (!knownIds.has(refId)) {
+        throw new Error(
+          `distsys diagram: \`events[${index}].from\`/\`.to\` reference unknown id \`${refId}\` ` +
+            `(expected one of: ${[...knownIds].map((known) => `\`${known}\``).join(', ')})`
+        );
+      }
+    }
+    if (from.some((refId) => to.includes(refId))) {
+      throw new Error(
+        `distsys diagram requires \`events[${index}].from\` and \`.to\` to be disjoint ` +
+          '(an event cannot go from a node to itself)'
+      );
+    }
+
+    return { id, label: labelOf(node, id), interval, showPath, from, to };
+  });
+};
+
 export const parser: ParserDefinition = {
   parser: {
     // @ts-expect-error - DistSysDB is not assignable to DiagramDB
@@ -93,55 +155,27 @@ export const parser: ParserDefinition = {
 
     if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
       throw new Error(
-        'distsys diagram requires `services`, `hub`, and `event` blocks, e.g.\n' +
+        'distsys diagram requires `services`, `hub`, and `events` blocks, e.g.\n' +
           'distsys-beta\n' +
           'services:\n  - id: orders\n    label: Order Service\n' +
           'hub:\n  id: bus\n  label: Event Hub\n' +
-          'event:\n  id: order-created\n  label: OrderCreated\n  interval: 1000\n' +
-          '  from: orders\n  to: bus'
+          'events:\n  - id: order-created\n    label: OrderCreated\n    interval: 1000\n' +
+          '    from: orders\n    to: bus'
       );
     }
 
     const services = parseServices(doc.services);
     const hubId = requireId(doc.hub, 'hub');
-    const eventId = requireId(doc.event, 'event');
 
     if (services.some((s) => s.id === hubId)) {
       throw new Error('distsys diagram requires `hub.id` to differ from every `services[].id`');
     }
 
-    const rawInterval = doc.event?.interval;
-    const interval =
-      rawInterval === undefined || rawInterval === null ? DEFAULT_INTERVAL_MS : Number(rawInterval);
-    if (!Number.isFinite(interval) || interval <= 0) {
-      throw new Error('distsys diagram requires `event.interval` to be a positive number of milliseconds');
-    }
-
-    const rawShowPath = doc.event?.showPath;
-    if (rawShowPath !== undefined && typeof rawShowPath !== 'boolean') {
-      throw new Error('distsys diagram requires `event.showPath` to be a boolean');
-    }
-    const showPath = rawShowPath ?? true;
-
-    const from = requireIds(doc.event?.from, 'event.from');
-    const to = requireIds(doc.event?.to, 'event.to');
     const knownIds = new Set([hubId, ...services.map((s) => s.id)]);
-    for (const refId of [...from, ...to]) {
-      if (!knownIds.has(refId)) {
-        throw new Error(
-          `distsys diagram: \`event.from\`/\`event.to\` reference unknown id \`${refId}\` ` +
-            `(expected one of: ${[...knownIds].map((known) => `\`${known}\``).join(', ')})`
-        );
-      }
-    }
-    if (from.some((id) => to.includes(id))) {
-      throw new Error(
-        'distsys diagram requires `event.from` and `event.to` to be disjoint (an event cannot go from a node to itself)'
-      );
-    }
+    const events = parseEvents(doc.events, knownIds);
 
     db.setServices(services);
     db.setHub({ id: hubId, label: labelOf(doc.hub, hubId) });
-    db.setEvent({ id: eventId, label: labelOf(doc.event, eventId), interval, showPath, from, to });
+    db.setEvents(events);
   },
 };

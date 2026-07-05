@@ -20,7 +20,7 @@ describe('distSys parser', () => {
     parser.parser.yy = db;
   });
 
-  it('parses a services list, hub, and event block', async () => {
+  it('parses a services list, hub, and an events list', async () => {
     const input = `distsys-beta
 services:
   - id: orders
@@ -28,24 +28,65 @@ services:
 hub:
   id: bus
   label: Event Hub
-event:
-  id: order-created
-  label: OrderCreated
-  interval: 500
-  from: orders
-  to: bus
+events:
+  - id: order-created
+    label: OrderCreated
+    interval: 500
+    from: orders
+    to: bus
 `;
     await parser.parse(input);
     expect(db.getServices()).toEqual([{ id: 'orders', label: 'Order Service' }]);
     expect(db.getHub()).toEqual({ id: 'bus', label: 'Event Hub' });
-    expect(db.getEvent()).toEqual({
-      id: 'order-created',
-      label: 'OrderCreated',
-      interval: 500,
-      showPath: true,
-      from: ['orders'],
-      to: ['bus'],
-    });
+    expect(db.getEvents()).toEqual([
+      {
+        id: 'order-created',
+        label: 'OrderCreated',
+        interval: 500,
+        showPath: true,
+        from: ['orders'],
+        to: ['bus'],
+      },
+    ]);
+  });
+
+  it('parses a round trip: one event service->hub, another hub->service', async () => {
+    const input = `distsys-beta
+services:
+  - id: orders
+    label: Order Service
+hub:
+  id: bus
+  label: Event Hub
+events:
+  - id: order-created
+    label: OrderCreated
+    from: orders
+    to: bus
+  - id: order-confirmed
+    label: OrderConfirmed
+    from: bus
+    to: orders
+`;
+    await parser.parse(input);
+    expect(db.getEvents()).toEqual([
+      {
+        id: 'order-created',
+        label: 'OrderCreated',
+        interval: 1000,
+        showPath: true,
+        from: ['orders'],
+        to: ['bus'],
+      },
+      {
+        id: 'order-confirmed',
+        label: 'OrderConfirmed',
+        interval: 1000,
+        showPath: true,
+        from: ['bus'],
+        to: ['orders'],
+      },
+    ]);
   });
 
   it('parses multiple services and a service<->service event', async () => {
@@ -57,18 +98,18 @@ services:
     label: Payment Service
 hub:
   id: bus
-event:
-  id: payment-requested
-  label: PaymentRequested
-  from: orders
-  to: payments
+events:
+  - id: payment-requested
+    label: PaymentRequested
+    from: orders
+    to: payments
 `;
     await parser.parse(input);
     expect(db.getServices()).toEqual([
       { id: 'orders', label: 'Order Service' },
       { id: 'payments', label: 'Payment Service' },
     ]);
-    expect(db.getEvent()).toMatchObject({ from: ['orders'], to: ['payments'] });
+    expect(db.getEvents()).toMatchObject([{ from: ['orders'], to: ['payments'] }]);
   });
 
   it('defaults label to id and interval to 1000ms when omitted', async () => {
@@ -77,66 +118,68 @@ services:
   - id: orders
 hub:
   id: bus
-event:
-  id: order-created
-  from: orders
-  to: bus
+events:
+  - id: order-created
+    from: orders
+    to: bus
 `;
     await parser.parse(input);
     expect(db.getServices()).toEqual([{ id: 'orders', label: 'orders' }]);
     expect(db.getHub()).toEqual({ id: 'bus', label: 'bus' });
-    expect(db.getEvent()).toEqual({
-      id: 'order-created',
-      label: 'order-created',
-      interval: 1000,
-      showPath: true,
-      from: ['orders'],
-      to: ['bus'],
-    });
+    expect(db.getEvents()).toEqual([
+      {
+        id: 'order-created',
+        label: 'order-created',
+        interval: 1000,
+        showPath: true,
+        from: ['orders'],
+        to: ['bus'],
+      },
+    ]);
   });
 
-  it('accepts event.from/to as a hub -> service list, normalizing single values to arrays', async () => {
+  it('accepts an event.from/to as a hub -> service list, normalizing single values to arrays', async () => {
     const input = `distsys-beta
 services:
   - id: orders
 hub:
   id: bus
-event:
-  id: order-created
-  from: [bus]
-  to: [orders]
+events:
+  - id: order-created
+    from: [bus]
+    to: [orders]
 `;
     await parser.parse(input);
-    expect(db.getEvent()).toMatchObject({ from: ['bus'], to: ['orders'] });
+    expect(db.getEvents()).toMatchObject([{ from: ['bus'], to: ['orders'] }]);
   });
 
-  it('parses event.showPath', async () => {
+  it('parses events[].showPath', async () => {
     const input = `distsys-beta
 services:
   - id: orders
 hub:
   id: bus
-event:
-  id: order-created
-  showPath: false
-  from: orders
-  to: bus
+events:
+  - id: order-created
+    showPath: false
+    from: orders
+    to: bus
 `;
     await parser.parse(input);
-    expect(db.getEvent()?.showPath).toBe(false);
+    expect(db.getEvents()[0]?.showPath).toBe(false);
   });
 
-  it('throws when event.showPath is not a boolean', async () => {
+  it('throws when events[].showPath is not a boolean', async () => {
     const input = `distsys-beta
 services:
   - id: orders
 hub:
   id: bus
-event:
-  id: order-created
-  showPath: yes
-  from: orders
-  to: bus
+events:
+  - id: order-created
+    showPath: yes
+    from: orders
+    to: bus
 `;
     await expect(parser.parse(input)).rejects.toThrow(/showPath/);
   });
@@ -145,10 +188,10 @@ event:
     const input = `distsys-beta
 hub:
   id: bus
-event:
-  id: order-created
-  from: orders
-  to: bus
+events:
+  - id: order-created
+    from: orders
+    to: bus
 `;
     await expect(parser.parse(input)).rejects.toThrow(/services/);
   });
@@ -158,10 +201,10 @@ event:
 services: []
 hub:
   id: bus
-event:
-  id: order-created
-  from: orders
-  to: bus
+events:
+  - id: order-created
+    from: orders
+    to: bus
 `;
     await expect(parser.parse(input)).rejects.toThrow(/services/);
   });
@@ -173,10 +216,10 @@ services:
   - id: orders
 hub:
   id: bus
-event:
-  id: order-created
-  from: orders
-  to: bus
+events:
+  - id: order-created
+    from: orders
+    to: bus
 `;
     await expect(parser.parse(input)).rejects.toThrow(/unique/);
   });
@@ -187,79 +230,117 @@ services:
   - id: same
 hub:
   id: same
-event:
-  id: order-created
-  from: same
-  to: same
+events:
+  - id: order-created
+    from: same
+    to: same
 `;
     await expect(parser.parse(input)).rejects.toThrow(/differ/);
   });
 
-  it('throws when event.interval is not a positive number', async () => {
+  it('throws when events is missing', async () => {
     const input = `distsys-beta
 services:
   - id: orders
 hub:
   id: bus
-event:
-  id: order-created
-  interval: -5
-  from: orders
-  to: bus
+`;
+    await expect(parser.parse(input)).rejects.toThrow(/events/);
+  });
+
+  it('throws when events is an empty list', async () => {
+    const input = `distsys-beta
+services:
+  - id: orders
+hub:
+  id: bus
+events: []
+`;
+    await expect(parser.parse(input)).rejects.toThrow(/events/);
+  });
+
+  it('throws when two events share the same id', async () => {
+    const input = `distsys-beta
+services:
+  - id: orders
+hub:
+  id: bus
+events:
+  - id: same
+    from: orders
+    to: bus
+  - id: same
+    from: bus
+    to: orders
+`;
+    await expect(parser.parse(input)).rejects.toThrow(/unique/);
+  });
+
+  it('throws when events[].interval is not a positive number', async () => {
+    const input = `distsys-beta
+services:
+  - id: orders
+hub:
+  id: bus
+events:
+  - id: order-created
+    interval: -5
+    from: orders
+    to: bus
 `;
     await expect(parser.parse(input)).rejects.toThrow(/interval/);
   });
 
-  it('throws when event.from is missing', async () => {
+  it('throws when events[].from is missing', async () => {
     const input = `distsys-beta
 services:
   - id: orders
 hub:
   id: bus
-event:
-  id: order-created
-  to: bus
+events:
+  - id: order-created
+    to: bus
 `;
-    await expect(parser.parse(input)).rejects.toThrow(/event\.from/);
+    await expect(parser.parse(input)).rejects.toThrow(/events\[0\]\.from/);
   });
 
-  it('throws when event.to is missing', async () => {
+  it('throws when events[].to is missing', async () => {
     const input = `distsys-beta
 services:
   - id: orders
 hub:
   id: bus
-event:
-  id: order-created
-  from: orders
+events:
+  - id: order-created
+    from: orders
 `;
-    await expect(parser.parse(input)).rejects.toThrow(/event\.to/);
+    await expect(parser.parse(input)).rejects.toThrow(/events\[0\]\.to/);
   });
 
-  it('throws when event.from/to reference an unknown id', async () => {
+  it('throws when events[].from/to reference an unknown id', async () => {
     const input = `distsys-beta
 services:
   - id: orders
 hub:
   id: bus
-event:
-  id: order-created
-  from: nope
-  to: bus
+events:
+  - id: order-created
+    from: nope
+    to: bus
 `;
     await expect(parser.parse(input)).rejects.toThrow(/unknown id/);
   });
 
-  it('throws when event.from and event.to overlap', async () => {
+  it('throws when events[].from and .to overlap', async () => {
     const input = `distsys-beta
 services:
   - id: orders
 hub:
   id: bus
-event:
-  id: order-created
-  from: orders
-  to: orders
+events:
+  - id: order-created
+    from: orders
+    to: orders
 `;
     await expect(parser.parse(input)).rejects.toThrow(/disjoint/);
   });

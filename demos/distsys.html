@@ -15,9 +15,9 @@
   <body>
     <h1>DistSys diagram demo</h1>
     <p>
-      One service, one hub, one event: <code>mermaid.run()</code> calls
-      <code>bindFunctions</code> automatically once each SVG below is inserted, so the orbs start
-      streaming with no extra wiring.
+      Services, a hub, and a list of events: <code>mermaid.run()</code> calls
+      <code>bindFunctions</code> automatically once each SVG below is inserted, so every event's
+      orbs start streaming with no extra wiring.
     </p>
 
     <h2>Basic stream (service &rarr; hub)</h2>
@@ -29,19 +29,20 @@ services:
 hub:
   id: bus
   label: Event Hub
-event:
-  id: order-created
-  label: OrderCreated
-  interval: 300
-  from: orders
-  to: bus
+events:
+  - id: order-created
+    label: OrderCreated
+    interval: 300
+    from: orders
+    to: bus
     </pre>
     <hr />
 
-    <h2>Reversed direction (hub &rarr; service)</h2>
+    <h2>Round trip: service &rarr; hub, then hub &rarr; service</h2>
     <p>
-      <code>event.from</code>/<code>event.to</code> pick the direction: swapping them flips which
-      way the orbs travel, arrowhead and all.
+      <code>events</code> is a list &mdash; two events between the same service and hub, going
+      opposite directions, render as two parallel lines instead of overlapping, and animate
+      independently.
     </p>
     <pre class="mermaid">
 distsys-beta
@@ -51,12 +52,17 @@ services:
 hub:
   id: bus
   label: Event Hub
-event:
-  id: order-confirmed
-  label: OrderConfirmed
-  interval: 600
-  from: bus
-  to: orders
+events:
+  - id: order-created
+    label: OrderCreated
+    interval: 500
+    from: orders
+    to: bus
+  - id: order-confirmed
+    label: OrderConfirmed
+    interval: 500
+    from: bus
+    to: orders
     </pre>
     <hr />
 
@@ -76,12 +82,12 @@ services:
 hub:
   id: bus
   label: Event Hub
-event:
-  id: payment-requested
-  label: PaymentRequested
-  interval: 500
-  from: orders
-  to: payments
+events:
+  - id: payment-requested
+    label: PaymentRequested
+    interval: 500
+    from: orders
+    to: payments
     </pre>
     <hr />
 
@@ -94,12 +100,12 @@ services:
 hub:
   id: bus
   label: Event Hub
-event:
-  id: payment-captured
-  label: PaymentCaptured
-  interval: 1500
-  from: payments
-  to: bus
+events:
+  - id: payment-captured
+    label: PaymentCaptured
+    interval: 1500
+    from: payments
+    to: bus
     </pre>
     <hr />
 
@@ -112,13 +118,13 @@ services:
 hub:
   id: bus
   label: Event Hub
-event:
-  id: page-viewed
-  label: PageViewed
-  interval: 400
-  showPath: false
-  from: analytics
-  to: bus
+events:
+  - id: page-viewed
+    label: PageViewed
+    interval: 400
+    showPath: false
+    from: analytics
+    to: bus
     </pre>
     <hr />
 
@@ -127,7 +133,9 @@ event:
       <code>mermaidAPI.render()</code> returns <code>bindFunctions</code>; calling it on the live
       SVG attaches a <code>.distSys</code> controller with <code>play()</code>,
       <code>pause()</code>, <code>stop()</code>, and <code>setPathVisible()</code> /
-      <code>togglePath()</code> for the connecting line.
+      <code>togglePath()</code> for the connecting line(s). With multiple events, these apply to
+      all of them at once; <code>svgEl.distSys.events['stock-reserved']</code> reaches a single
+      one.
     </p>
     <div id="controlledDiagram"></div>
     <button id="btnPlay">play</button>
@@ -146,12 +154,12 @@ services:
 hub:
   id: bus
   label: Event Hub
-event:
-  id: stock-reserved
-  label: StockReserved
-  interval: 500
-  from: inventory
-  to: bus
+events:
+  - id: stock-reserved
+    label: StockReserved
+    interval: 500
+    from: inventory
+    to: bus
 `;
       const { svg, bindFunctions } = await mermaid.mermaidAPI.render('controlledGraph', src);
       const mount = document.getElementById('controlledDiagram');

@@ -2,7 +2,7 @@ import type { DrawDefinition, SVG } from '../../diagram-api/types.js';
 import type { Diagram } from '../../Diagram.js';
 import { selectSvgElement } from '../../rendering-util/selectSvgElement.js';
 import { configureSvgSize } from '../../setupGraphViewbox.js';
-import { attachDistSysAnimation } from './distSysAnimator.js';
+import { attachDistSysAnimation, type DistSysAnimationController } from './distSysAnimator.js';
 import type { DistSysDB } from './distSysDb.js';
 
 const MARGIN_X = 60;
@@ -17,6 +17,8 @@ const SERVICE_GAP_X = 48;
 const GAP_Y = 90;
 const LABEL_OFFSET_X = 14;
 const LABEL_OFFSET_Y = 18;
+const LABEL_ROW_HEIGHT = 16;
+const PARALLEL_OFFSET = 16;
 const TOKEN_RADIUS = 7;
 const TRAVEL_DURATION_MS = 900;
 
@@ -33,19 +35,31 @@ const measureWidth = (el: SVGGraphicsElement): number => {
 
 type Endpoint = { kind: 'hub' } | { kind: 'service'; index: number };
 
+/** Two events sharing the same pair of nodes (regardless of direction) share this key, so they
+ * can be offset into parallel lines instead of drawing exactly on top of one another. */
+const connectorKeyOf = (fromEnd: Endpoint, toEnd: Endpoint): string => {
+  if (fromEnd.kind === 'hub' || toEnd.kind === 'hub') {
+    const serviceEnd = fromEnd.kind === 'hub' ? toEnd : fromEnd;
+    return `hub:${(serviceEnd as { index: number }).index}`;
+  }
+  const lo = Math.min(fromEnd.index, toEnd.index);
+  const hi = Math.max(fromEnd.index, toEnd.index);
+  return `pair:${lo}-${hi}`;
+};
+
 export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
   const db = diagObj.db as DistSysDB;
   db.setDiagramId(id);
 
   const services = db.getServices();
   const hub = db.getHub();
-  const event = db.getEvent();
-  if (services.length === 0 || !hub || !event) {
-    throw new Error('distsys diagram requires `services`, `hub`, and `event` blocks');
+  const events = db.getEvents();
+  if (services.length === 0 || !hub || events.length === 0) {
+    throw new Error('distsys diagram requires `services`, `hub`, and `events` blocks');
   }
 
-  // The parser guarantees from/to are known, disjoint ids, so exactly one of the two
-  // resolves to the hub (a service<->service event) or neither does (a hub<->service event).
+  // The parser guarantees each event's from/to are known, disjoint ids, so exactly one of the
+  // two resolves to the hub (a hub<->service event) or neither does (a service<->service event).
   const resolveEndpoint = (refId: string): Endpoint => {
     if (refId === hub.id) {
       return { kind: 'hub' };
@@ -53,14 +67,30 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     const index = services.findIndex((service) => service.id === refId);
     return { kind: 'service', index };
   };
-  const fromEnd = resolveEndpoint(event.from[0]);
-  const toEnd = resolveEndpoint(event.to[0]);
+  const eventEnds = events.map((event) => ({
+    event,
+    fromEnd: resolveEndpoint(event.from[0]),
+    toEnd: resolveEndpoint(event.to[0]),
+  }));
+
+  // Group events that connect the same two nodes so they can be spaced into parallel lines
+  // (e.g. a service->hub event and a hub->service event between the same pair) rather than
+  // overlapping exactly.
+  const connectorGroups = new Map<string, number[]>();
+  eventEnds.forEach(({ fromEnd, toEnd }, i) => {
+    const key = connectorKeyOf(fromEnd, toEnd);
+    const list = connectorGroups.get(key) ?? [];
+    list.push(i);
+    connectorGroups.set(key, list);
+  });
+  const groupPosition = eventEnds.map(({ fromEnd, toEnd }, i) => {
+    const list = connectorGroups.get(connectorKeyOf(fromEnd, toEnd))!;
+    return { indexInGroup: list.indexOf(i), groupSize: list.length };
+  });
 
   const svg: SVG = selectSvgElement(id);
 
   const markerId = `${id}-distsys-arrow`;
-  const pathId = `${id}-distsys-event-path`;
-  const tokensId = `${id}-distsys-tokens`;
 
   svg
     .append('defs')
@@ -76,8 +106,8 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     .attr('d', 'M 0 0 L 10 5 L 0 10 z')
     .attr('class', 'distsys-arrow');
 
-  // Text is measured before anything is positioned, so the hub bar, every service box, and
-  // the overall canvas can all grow to fit arbitrarily long labels.
+  // Text is measured before anything is positioned, so the hub bar, every service box, every
+  // edge label, and the overall canvas can all grow to fit arbitrarily long labels.
   const hubG = svg.append('g').attr('class', 'distsys-node distsys-hub');
   const hubText = hubG
     .append('text')
@@ -96,28 +126,27 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
   });
 
   const pathG = svg.append('g').attr('class', 'distsys-path');
-  const labelText = pathG
-    .append('text')
-    .attr('dominant-baseline', 'middle')
-    .attr('class', 'distsys-edge-label')
-    .text(event.label);
+  const eventLabelTexts = events.map((event) =>
+    pathG.append('text').attr('dominant-baseline', 'middle').attr('class', 'distsys-edge-label').text(event.label)
+  );
 
   const serviceWidths = serviceNodes.map(({ text }) =>
     Math.max(MIN_NODE_WIDTH, measureWidth(text.node()!) + NODE_TEXT_PADDING_X)
   );
-  const labelWidth = measureWidth(labelText.node()!);
+  const labelWidths = eventLabelTexts.map((text) => measureWidth(text.node()!));
 
-  // Gaps between adjacent services default to SERVICE_GAP_X, but the one gap a direct
-  // service<->service event connects is widened to fit that event's label so it doesn't
-  // overlap either box.
+  // Gaps between adjacent services default to SERVICE_GAP_X, but any gap a direct
+  // service<->service event connects is widened to fit the widest such event's label.
   const gaps = new Array(Math.max(services.length - 1, 0)).fill(SERVICE_GAP_X);
-  if (fromEnd.kind === 'service' && toEnd.kind === 'service') {
-    const lo = Math.min(fromEnd.index, toEnd.index);
-    const hi = Math.max(fromEnd.index, toEnd.index);
-    if (hi === lo + 1) {
-      gaps[lo] = Math.max(SERVICE_GAP_X, labelWidth + NODE_TEXT_PADDING_X);
+  eventEnds.forEach(({ fromEnd, toEnd }, i) => {
+    if (fromEnd.kind === 'service' && toEnd.kind === 'service') {
+      const lo = Math.min(fromEnd.index, toEnd.index);
+      const hi = Math.max(fromEnd.index, toEnd.index);
+      if (hi === lo + 1) {
+        gaps[lo] = Math.max(gaps[lo], labelWidths[i] + NODE_TEXT_PADDING_X);
+      }
     }
-  }
+  });
 
   const servicesWidth =
     serviceWidths.reduce((sum, w) => sum + w, 0) + gaps.reduce((sum, g) => sum + g, 0);
@@ -150,45 +179,67 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
   const centerXOf = (end: Endpoint): number =>
     end.kind === 'hub' ? hubX + hubWidth / 2 : serviceBoxes[end.index].centerX;
 
-  // The path's start/end order is the travel direction: the animator always moves from the
-  // start point to the end point, so `from`/`to` decide direction and, for service<->service
-  // events, which side of each box the line touches. All x values here are still relative to
-  // the unshifted layout — the whole canvas is translated once the full extent is known below.
-  let startX: number, startY: number, endX: number, endY: number;
-  let labelX: number, labelY: number;
-  let labelAnchor: 'start' | 'middle';
-  if (fromEnd.kind === 'hub' || toEnd.kind === 'hub') {
-    // Hub<->service: a vertical line directly above the referenced service's center.
-    const serviceEnd = fromEnd.kind === 'hub' ? toEnd : fromEnd;
-    const cx = centerXOf(serviceEnd);
-    startX = endX = cx;
-    startY = fromEnd.kind === 'hub' ? hubBottom : serviceY;
-    endY = fromEnd.kind === 'hub' ? serviceY : hubBottom;
-    labelX = cx + LABEL_OFFSET_X;
-    labelY = (hubBottom + serviceY) / 2;
-    labelAnchor = 'start';
-  } else {
+  // Each event's start/end order is its travel direction: the animator always moves from the
+  // start point to the end point. Events sharing a connector are nudged apart via `centered`
+  // (their signed offset from the shared center line) so opposite-direction lines don't overlap.
+  const geometry = eventEnds.map(({ fromEnd, toEnd }, i) => {
+    const { indexInGroup, groupSize } = groupPosition[i];
+    const centered = indexInGroup - (groupSize - 1) / 2;
+    const labelWidth = labelWidths[i];
+
+    if (fromEnd.kind === 'hub' || toEnd.kind === 'hub') {
+      // Hub<->service: a vertical line above the referenced service's center.
+      const serviceEnd = fromEnd.kind === 'hub' ? toEnd : fromEnd;
+      const cx = centerXOf(serviceEnd) + centered * PARALLEL_OFFSET;
+      const startY = fromEnd.kind === 'hub' ? hubBottom : serviceY;
+      const endY = fromEnd.kind === 'hub' ? serviceY : hubBottom;
+      const labelX = cx + LABEL_OFFSET_X;
+      const labelY = (hubBottom + serviceY) / 2 + centered * LABEL_ROW_HEIGHT;
+      return {
+        startX: cx,
+        endX: cx,
+        startY,
+        endY,
+        labelX,
+        labelY,
+        labelAnchor: 'start' as const,
+        labelLeft: labelX,
+        labelRight: labelX + labelWidth,
+      };
+    }
     // Service<->service: a direct horizontal line between the two boxes' facing sides. Routes
     // straight through any boxes in between if the two services aren't neighbors.
-    const fromBox = serviceBoxes[fromEnd.index];
-    const toBox = serviceBoxes[toEnd.index];
+    const fromBox = serviceBoxes[(fromEnd as { index: number }).index];
+    const toBox = serviceBoxes[(toEnd as { index: number }).index];
     const goesRight = fromBox.centerX < toBox.centerX;
-    startX = goesRight ? fromBox.x + fromBox.width : fromBox.x;
-    endX = goesRight ? toBox.x : toBox.x + toBox.width;
-    startY = endY = serviceCenterY;
-    labelX = (startX + endX) / 2;
+    const startX = goesRight ? fromBox.x + fromBox.width : fromBox.x;
+    const endX = goesRight ? toBox.x : toBox.x + toBox.width;
+    const y = serviceCenterY + centered * PARALLEL_OFFSET;
+    const labelX = (startX + endX) / 2;
     // The line runs through the boxes' vertical center, so the label sits above the whole row
     // (in the hub<->service gap) rather than at line height, to avoid overlapping either box.
-    labelY = serviceY - LABEL_OFFSET_Y;
-    labelAnchor = 'middle';
-  }
+    const labelY = serviceY - LABEL_OFFSET_Y - centered * LABEL_ROW_HEIGHT;
+    return {
+      startX,
+      endX,
+      startY: y,
+      endY: y,
+      labelX,
+      labelY,
+      labelAnchor: 'middle' as const,
+      labelLeft: labelX - labelWidth / 2,
+      labelRight: labelX + labelWidth / 2,
+    };
+  });
 
-  // Extend the canvas to fit whichever content (hub bar, service row, or the edge label)
+  // Extend the canvas to fit whichever content (hub bar, service row, or any edge label)
   // reaches furthest, then shift everything so the leftmost content sits at MARGIN_X.
-  const labelLeft = labelAnchor === 'start' ? labelX : labelX - labelWidth / 2;
-  const labelRight = labelAnchor === 'start' ? labelX + labelWidth : labelX + labelWidth / 2;
-  const minX = Math.min(hubX, servicesStartX, labelLeft, startX, endX);
-  const maxX = Math.max(hubX + hubWidth, servicesStartX + servicesWidth, labelRight, startX, endX);
+  let minX = Math.min(hubX, servicesStartX);
+  let maxX = Math.max(hubX + hubWidth, servicesStartX + servicesWidth);
+  geometry.forEach((g) => {
+    minX = Math.min(minX, g.labelLeft, g.startX, g.endX);
+    maxX = Math.max(maxX, g.labelRight, g.startX, g.endX);
+  });
   const offsetX = MARGIN_X - minX;
   const width = maxX - minX + MARGIN_X * 2;
   const shift = (x: number) => x + offsetX;
@@ -196,13 +247,20 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
   svg.attr('viewBox', `0 0 ${width} ${height}`);
   configureSvgSize(svg, height, width, db.getConfig().useMaxWidth);
 
-  pathG
-    .insert('path', 'text')
-    .attr('id', pathId)
-    .attr('d', `M${shift(startX)},${startY} L${shift(endX)},${endY}`)
-    .attr('marker-end', `url(#${markerId})`)
-    .attr('class', 'distsys-edge');
-  labelText.attr('text-anchor', labelAnchor).attr('x', shift(labelX)).attr('y', labelY);
+  const perEventIds = events.map((event) => ({
+    pathId: `${id}-distsys-event-path-${event.id}`,
+    tokensId: `${id}-distsys-tokens-${event.id}`,
+  }));
+
+  geometry.forEach((g, i) => {
+    pathG
+      .insert('path', 'text')
+      .attr('id', perEventIds[i].pathId)
+      .attr('d', `M${shift(g.startX)},${g.startY} L${shift(g.endX)},${g.endY}`)
+      .attr('marker-end', `url(#${markerId})`)
+      .attr('class', 'distsys-edge');
+    eventLabelTexts[i].attr('text-anchor', g.labelAnchor).attr('x', shift(g.labelX)).attr('y', g.labelY);
+  });
 
   hubG
     .insert('rect', 'text')
@@ -224,11 +282,13 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     text.attr('x', shift(box.centerX)).attr('y', serviceCenterY);
   });
 
-  svg.append('g').attr('class', 'distsys-tokens').attr('id', tokensId);
+  events.forEach((_event, i) => {
+    svg.append('g').attr('class', 'distsys-tokens').attr('id', perEventIds[i].tokensId);
+  });
 
   // The animation only runs once this SVG is live in the page — see distSysAnimator.ts.
   // The caller (whoever inserted `svg` into the DOM) must invoke the returned `bindFunctions`
-  // with that live element for the stream to start.
+  // with that live element for the streams to start.
   db.bindFunctions = (element: Element) => {
     const svgEl = (element.tagName === 'svg' ? element : element.querySelector('svg')) as
       | SVGSVGElement
@@ -236,19 +296,44 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     if (!svgEl) {
       return;
     }
-    const controller = attachDistSysAnimation({
-      svg: svgEl,
-      pathSelector: `#${pathId}`,
-      tokenGroupSelector: `#${tokensId}`,
-      interval: event.interval,
-      travelDuration: TRAVEL_DURATION_MS,
-      tokenRadius: TOKEN_RADIUS,
-      tokenClass: 'distsys-token',
-      pathVisible: event.showPath,
+    const controllersById: Record<string, DistSysAnimationController> = {};
+    events.forEach((event, i) => {
+      controllersById[event.id] = attachDistSysAnimation({
+        svg: svgEl,
+        pathSelector: `#${perEventIds[i].pathId}`,
+        tokenGroupSelector: `#${perEventIds[i].tokensId}`,
+        interval: event.interval,
+        travelDuration: TRAVEL_DURATION_MS,
+        tokenRadius: TOKEN_RADIUS,
+        tokenClass: 'distsys-token',
+        pathVisible: event.showPath,
+      });
     });
-    // Exposed so page code can do `svgEl.distSys.pause()` / `.play()` / `.setPathVisible()` / etc.
-    (svgEl as unknown as { distSys: typeof controller }).distSys = controller;
-    controller.play();
+    const controllerList = Object.values(controllersById);
+    // Exposed so page code can do `svgEl.distSys.pause()` / `.play()` / `.setPathVisible()` / etc,
+    // applied across every event's stream at once, plus `.events[id]` for per-event control.
+    const aggregate: DistSysAnimationController & { events: typeof controllersById } = {
+      play() {
+        controllerList.forEach((c) => c.play());
+      },
+      pause() {
+        controllerList.forEach((c) => c.pause());
+      },
+      stop() {
+        controllerList.forEach((c) => c.stop());
+      },
+      setPathVisible(visible: boolean) {
+        controllerList.forEach((c) => c.setPathVisible(visible));
+      },
+      togglePath() {
+        const nowVisible = controllerList[0] ? controllerList[0].togglePath() : false;
+        controllerList.slice(1).forEach((c) => c.setPathVisible(nowVisible));
+        return nowVisible;
+      },
+      events: controllersById,
+    };
+    (svgEl as unknown as { distSys: typeof aggregate }).distSys = aggregate;
+    aggregate.play();
   };
 };
 
