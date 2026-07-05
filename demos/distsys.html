@@ -20,7 +20,7 @@
       streaming with no extra wiring.
     </p>
 
-    <h2>Basic stream</h2>
+    <h2>Basic stream (service &rarr; hub)</h2>
     <pre class="mermaid">
 distsys-beta
 service:
@@ -33,6 +33,30 @@ event:
   id: order-created
   label: OrderCreated
   interval: 300
+  from: orders
+  to: bus
+    </pre>
+    <hr />
+
+    <h2>Reversed direction (hub &rarr; service)</h2>
+    <p>
+      <code>event.from</code>/<code>event.to</code> pick the direction: swapping them flips which
+      way the orbs travel, arrowhead and all.
+    </p>
+    <pre class="mermaid">
+distsys-beta
+service:
+  id: orders
+  label: Order Service
+hub:
+  id: bus
+  label: Event Hub
+event:
+  id: order-confirmed
+  label: OrderConfirmed
+  interval: 600
+  from: bus
+  to: orders
     </pre>
     <hr />
 
@@ -49,6 +73,8 @@ event:
   id: payment-captured
   label: PaymentCaptured
   interval: 1500
+  from: payments
+  to: bus
     </pre>
     <hr />
 
@@ -66,6 +92,8 @@ event:
   label: PageViewed
   interval: 400
   showPath: false
+  from: analytics
+  to: bus
     </pre>
     <hr />
 
@@ -97,6 +125,8 @@ event:
   id: stock-reserved
   label: StockReserved
   interval: 500
+  from: inventory
+  to: bus
 `;
       const { svg, bindFunctions } = await mermaid.mermaidAPI.render('controlledGraph', src);
       const mount = document.getElementById('controlledDiagram');

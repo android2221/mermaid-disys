@@ -16,4 +16,8 @@ export interface DistSysEvent {
   interval: number;
   /** Whether the connecting line is drawn. The orbs travel along the route either way. */
   showPath: boolean;
+  /** Ids of the node(s) this event originates from (a `service.id` or `hub.id`). */
+  from: string[];
+  /** Ids of the node(s) this event is delivered to (a `service.id` or `hub.id`). */
+  to: string[];
 }

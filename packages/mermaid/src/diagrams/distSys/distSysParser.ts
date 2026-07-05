@@ -13,6 +13,8 @@ interface DistSysYamlNode {
 interface DistSysYamlEvent extends DistSysYamlNode {
   interval?: unknown;
   showPath?: unknown;
+  from?: unknown;
+  to?: unknown;
 }
 
 interface DistSysYamlDoc {
@@ -30,6 +32,20 @@ const requireId = (node: DistSysYamlNode | undefined, field: string): string => 
 
 const labelOf = (node: DistSysYamlNode | undefined, fallbackId: string): string => {
   return typeof node?.label === 'string' && node.label.trim() !== '' ? node.label : fallbackId;
+};
+
+/** Accepts either a single id or a YAML sequence of ids and normalizes to a non-empty string[]. */
+const requireIds = (value: unknown, field: string): string[] => {
+  const arr = value === undefined ? [] : Array.isArray(value) ? value : [value];
+  if (arr.length === 0) {
+    throw new Error(`distsys diagram requires \`${field}\` to be set to an id or list of ids`);
+  }
+  return arr.map((item) => {
+    if (typeof item !== 'string' || item.trim() === '') {
+      throw new Error(`distsys diagram requires every entry in \`${field}\` to be a non-empty string`);
+    }
+    return item;
+  });
 };
 
 export const parser: ParserDefinition = {
@@ -61,7 +77,8 @@ export const parser: ParserDefinition = {
           'distsys-beta\n' +
           'service:\n  id: orders\n  label: Order Service\n' +
           'hub:\n  id: bus\n  label: Event Hub\n' +
-          'event:\n  id: order-created\n  label: OrderCreated\n  interval: 1000'
+          'event:\n  id: order-created\n  label: OrderCreated\n  interval: 1000\n' +
+          '  from: orders\n  to: bus'
       );
     }
 
@@ -86,8 +103,25 @@ export const parser: ParserDefinition = {
     }
     const showPath = rawShowPath ?? true;
 
+    const from = requireIds(doc.event?.from, 'event.from');
+    const to = requireIds(doc.event?.to, 'event.to');
+    const knownIds = new Set([serviceId, hubId]);
+    for (const refId of [...from, ...to]) {
+      if (!knownIds.has(refId)) {
+        throw new Error(
+          `distsys diagram: \`event.from\`/\`event.to\` reference unknown id \`${refId}\` ` +
+            `(expected \`${serviceId}\` or \`${hubId}\`)`
+        );
+      }
+    }
+    if (from.some((id) => to.includes(id))) {
+      throw new Error(
+        'distsys diagram requires `event.from` and `event.to` to be disjoint (an event cannot go from a node to itself)'
+      );
+    }
+
     db.setService({ id: serviceId, label: labelOf(doc.service, serviceId) });
     db.setHub({ id: hubId, label: labelOf(doc.hub, hubId) });
-    db.setEvent({ id: eventId, label: labelOf(doc.event, eventId), interval, showPath });
+    db.setEvent({ id: eventId, label: labelOf(doc.event, eventId), interval, showPath, from, to });
   },
 };

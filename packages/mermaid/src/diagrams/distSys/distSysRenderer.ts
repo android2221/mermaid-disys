@@ -40,6 +40,10 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     throw new Error('distsys diagram requires a `service`, `hub`, and `event` block');
   }
 
+  // Only one service and one hub exist today, so `from`/`to` (validated by the parser to be
+  // disjoint ids from {service.id, hub.id}) resolve to exactly one of these two directions.
+  const isServiceToHub = event.from.includes(service.id) && event.to.includes(hub.id);
+
   const svg: SVG = selectSvgElement(id);
 
   const markerId = `${id}-distsys-arrow`;
@@ -115,11 +119,15 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
   svg.attr('viewBox', `0 0 ${width} ${height}`);
   configureSvgSize(svg, height, width, db.getConfig().useMaxWidth);
 
-  // Orbs travel bottom-to-top: the service emits up into the hub.
+  // The path's `d` order is the travel direction: the animator always moves from the start
+  // point (M) to the end point (L), so `from`/`to` decide whether orbs go up into the hub or
+  // down into the service.
+  const servicePoint = `${centerX},${serviceY}`;
+  const hubPoint = `${centerX},${hubBottom}`;
   pathG
     .insert('path', 'text')
     .attr('id', pathId)
-    .attr('d', `M${centerX},${serviceY} L${centerX},${hubBottom}`)
+    .attr('d', isServiceToHub ? `M${servicePoint} L${hubPoint}` : `M${hubPoint} L${servicePoint}`)
     .attr('marker-end', `url(#${markerId})`)
     .attr('class', 'distsys-edge');
   labelText.attr('x', centerX + LABEL_OFFSET_X).attr('y', (hubBottom + serviceY) / 2);
