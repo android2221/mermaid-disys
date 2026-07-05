@@ -19,6 +19,8 @@ const LABEL_BELOW_GAP = 16;
 const LABEL_ROW_HEIGHT = 20;
 const LABEL_TEXT_HALF_HEIGHT = 7;
 const PARALLEL_OFFSET = 16;
+const ROW_LINE_TO_LABEL_GAP = 14;
+const ROW_HEIGHT = 32;
 const TOKEN_RADIUS = 7;
 const TRAVEL_DURATION_MS = 900;
 
@@ -215,17 +217,35 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     const goesRight = fromBox.centerX < toBox.centerX;
     const startX = goesRight ? fromBox.x + fromBox.width : fromBox.x;
     const endX = goesRight ? toBox.x : toBox.x + toBox.width;
-    const y = serviceCenterY + centered * PARALLEL_OFFSET;
     const labelX = (startX + endX) / 2;
-    // The line runs through the boxes' vertical center, so the label sits directly underneath
-    // the whole row instead of at line height (avoiding the box), stacked in group order with a
-    // small gap so a second event sharing this connector doesn't jumble into the first.
-    const labelY = serviceY + NODE_HEIGHT + LABEL_BELOW_GAP + indexInGroup * LABEL_ROW_HEIGHT;
+
+    if (groupSize === 1) {
+      // The one event on this connector runs straight through the boxes' vertical center, with
+      // its label directly beneath the whole row.
+      const y = serviceCenterY;
+      const labelY = serviceY + NODE_HEIGHT + LABEL_BELOW_GAP;
+      return {
+        startX,
+        endX,
+        startY: y,
+        endY: y,
+        labelX,
+        labelY,
+        labelAnchor: 'middle' as const,
+        labelLeft: labelX - labelWidth / 2,
+        labelRight: labelX + labelWidth / 2,
+      };
+    }
+    // Multiple events share this connector: rather than clustering every line together
+    // followed by every label, each event gets its own row below the service row — its line,
+    // then its label directly beneath it, then the next event's line, then its label.
+    const rowY = serviceY + NODE_HEIGHT + LABEL_BELOW_GAP + indexInGroup * ROW_HEIGHT;
+    const labelY = rowY + ROW_LINE_TO_LABEL_GAP;
     return {
       startX,
       endX,
-      startY: y,
-      endY: y,
+      startY: rowY,
+      endY: rowY,
       labelX,
       labelY,
       labelAnchor: 'middle' as const,
