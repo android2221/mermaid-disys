@@ -15,9 +15,9 @@ const MIN_NODE_WIDTH = 120;
 const NODE_TEXT_PADDING_X = 28;
 const SERVICE_GAP_X = 48;
 const GAP_Y = 90;
-const LABEL_OFFSET_X = 14;
-const LABEL_OFFSET_Y = 18;
-const LABEL_ROW_HEIGHT = 16;
+const LABEL_BELOW_GAP = 16;
+const LABEL_ROW_HEIGHT = 20;
+const LABEL_TEXT_HALF_HEIGHT = 7;
 const PARALLEL_OFFSET = 16;
 const TOKEN_RADIUS = 7;
 const TRAVEL_DURATION_MS = 900;
@@ -135,18 +135,9 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
   );
   const labelWidths = eventLabelTexts.map((text) => measureWidth(text.node()!));
 
-  // Gaps between adjacent services default to SERVICE_GAP_X, but any gap a direct
-  // service<->service event connects is widened to fit the widest such event's label.
+  // Gaps between adjacent services are a fixed width — service<->service labels render below
+  // the row (not in the gap itself), so the gap only needs to fit the connecting line.
   const gaps = new Array(Math.max(services.length - 1, 0)).fill(SERVICE_GAP_X);
-  eventEnds.forEach(({ fromEnd, toEnd }, i) => {
-    if (fromEnd.kind === 'service' && toEnd.kind === 'service') {
-      const lo = Math.min(fromEnd.index, toEnd.index);
-      const hi = Math.max(fromEnd.index, toEnd.index);
-      if (hi === lo + 1) {
-        gaps[lo] = Math.max(gaps[lo], labelWidths[i] + NODE_TEXT_PADDING_X);
-      }
-    }
-  });
 
   const servicesWidth =
     serviceWidths.reduce((sum, w) => sum + w, 0) + gaps.reduce((sum, g) => sum + g, 0);
@@ -166,7 +157,6 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
   const hubBottom = hubY + HUB_HEIGHT;
   const serviceY = hubBottom + GAP_Y;
   const serviceCenterY = serviceY + NODE_HEIGHT / 2;
-  const height = serviceY + NODE_HEIGHT + MARGIN_Y;
 
   // Lay out services left-to-right, then record each one's box + center for path routing.
   let cursorX = servicesStartX;
@@ -188,23 +178,24 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     const labelWidth = labelWidths[i];
 
     if (fromEnd.kind === 'hub' || toEnd.kind === 'hub') {
-      // Hub<->service: a vertical line above the referenced service's center.
+      // Hub<->service: a vertical line above the referenced service's center. The label sits
+      // centered directly on the line, in the empty gap between hub and service; events sharing
+      // this connector stack their labels in group order with a fixed gap between each.
       const serviceEnd = fromEnd.kind === 'hub' ? toEnd : fromEnd;
       const cx = centerXOf(serviceEnd) + centered * PARALLEL_OFFSET;
       const startY = fromEnd.kind === 'hub' ? hubBottom : serviceY;
       const endY = fromEnd.kind === 'hub' ? serviceY : hubBottom;
-      const labelX = cx + LABEL_OFFSET_X;
-      const labelY = (hubBottom + serviceY) / 2 + centered * LABEL_ROW_HEIGHT;
+      const labelY = (hubBottom + serviceY) / 2 + indexInGroup * LABEL_ROW_HEIGHT;
       return {
         startX: cx,
         endX: cx,
         startY,
         endY,
-        labelX,
+        labelX: cx,
         labelY,
-        labelAnchor: 'start' as const,
-        labelLeft: labelX,
-        labelRight: labelX + labelWidth,
+        labelAnchor: 'middle' as const,
+        labelLeft: cx - labelWidth / 2,
+        labelRight: cx + labelWidth / 2,
       };
     }
     // Service<->service: a direct horizontal line between the two boxes' facing sides. Routes
@@ -216,9 +207,10 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     const endX = goesRight ? toBox.x : toBox.x + toBox.width;
     const y = serviceCenterY + centered * PARALLEL_OFFSET;
     const labelX = (startX + endX) / 2;
-    // The line runs through the boxes' vertical center, so the label sits above the whole row
-    // (in the hub<->service gap) rather than at line height, to avoid overlapping either box.
-    const labelY = serviceY - LABEL_OFFSET_Y - centered * LABEL_ROW_HEIGHT;
+    // The line runs through the boxes' vertical center, so the label sits directly underneath
+    // the whole row instead of at line height (avoiding the box), stacked in group order with a
+    // small gap so a second event sharing this connector doesn't jumble into the first.
+    const labelY = serviceY + NODE_HEIGHT + LABEL_BELOW_GAP + indexInGroup * LABEL_ROW_HEIGHT;
     return {
       startX,
       endX,
@@ -236,12 +228,15 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
   // reaches furthest, then shift everything so the leftmost content sits at MARGIN_X.
   let minX = Math.min(hubX, servicesStartX);
   let maxX = Math.max(hubX + hubWidth, servicesStartX + servicesWidth);
+  let maxY = serviceY + NODE_HEIGHT;
   geometry.forEach((g) => {
     minX = Math.min(minX, g.labelLeft, g.startX, g.endX);
     maxX = Math.max(maxX, g.labelRight, g.startX, g.endX);
+    maxY = Math.max(maxY, g.labelY + LABEL_TEXT_HALF_HEIGHT);
   });
   const offsetX = MARGIN_X - minX;
   const width = maxX - minX + MARGIN_X * 2;
+  const height = maxY + MARGIN_Y;
   const shift = (x: number) => x + offsetX;
 
   svg.attr('viewBox', `0 0 ${width} ${height}`);
