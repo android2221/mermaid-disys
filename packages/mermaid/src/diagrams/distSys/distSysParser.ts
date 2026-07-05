@@ -18,7 +18,7 @@ interface DistSysYamlEvent extends DistSysYamlNode {
 }
 
 interface DistSysYamlDoc {
-  service?: DistSysYamlNode;
+  services?: unknown;
   hub?: DistSysYamlNode;
   event?: DistSysYamlEvent;
 }
@@ -32,6 +32,26 @@ const requireId = (node: DistSysYamlNode | undefined, field: string): string => 
 
 const labelOf = (node: DistSysYamlNode | undefined, fallbackId: string): string => {
   return typeof node?.label === 'string' && node.label.trim() !== '' ? node.label : fallbackId;
+};
+
+/** `services` is a YAML sequence of `{id, label}` nodes; ids must be unique. */
+const parseServices = (value: unknown): { id: string; label: string }[] => {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(
+      'distsys diagram requires `services` to be a non-empty list, e.g.\n' +
+        'services:\n  - id: orders\n    label: Order Service'
+    );
+  }
+  const seen = new Set<string>();
+  return value.map((raw, index) => {
+    const node = raw as DistSysYamlNode | undefined;
+    const id = requireId(node, `services[${index}]`);
+    if (seen.has(id)) {
+      throw new Error(`distsys diagram requires every \`services[].id\` to be unique (duplicate: \`${id}\`)`);
+    }
+    seen.add(id);
+    return { id, label: labelOf(node, id) };
+  });
 };
 
 /** Accepts either a single id or a YAML sequence of ids and normalizes to a non-empty string[]. */
@@ -73,21 +93,21 @@ export const parser: ParserDefinition = {
 
     if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
       throw new Error(
-        'distsys diagram requires a `service`, `hub`, and `event` block, e.g.\n' +
+        'distsys diagram requires `services`, `hub`, and `event` blocks, e.g.\n' +
           'distsys-beta\n' +
-          'service:\n  id: orders\n  label: Order Service\n' +
+          'services:\n  - id: orders\n    label: Order Service\n' +
           'hub:\n  id: bus\n  label: Event Hub\n' +
           'event:\n  id: order-created\n  label: OrderCreated\n  interval: 1000\n' +
           '  from: orders\n  to: bus'
       );
     }
 
-    const serviceId = requireId(doc.service, 'service');
+    const services = parseServices(doc.services);
     const hubId = requireId(doc.hub, 'hub');
     const eventId = requireId(doc.event, 'event');
 
-    if (serviceId === hubId) {
-      throw new Error('distsys diagram requires `service.id` and `hub.id` to be different');
+    if (services.some((s) => s.id === hubId)) {
+      throw new Error('distsys diagram requires `hub.id` to differ from every `services[].id`');
     }
 
     const rawInterval = doc.event?.interval;
@@ -105,12 +125,12 @@ export const parser: ParserDefinition = {
 
     const from = requireIds(doc.event?.from, 'event.from');
     const to = requireIds(doc.event?.to, 'event.to');
-    const knownIds = new Set([serviceId, hubId]);
+    const knownIds = new Set([hubId, ...services.map((s) => s.id)]);
     for (const refId of [...from, ...to]) {
       if (!knownIds.has(refId)) {
         throw new Error(
           `distsys diagram: \`event.from\`/\`event.to\` reference unknown id \`${refId}\` ` +
-            `(expected \`${serviceId}\` or \`${hubId}\`)`
+            `(expected one of: ${[...knownIds].map((known) => `\`${known}\``).join(', ')})`
         );
       }
     }
@@ -120,7 +140,7 @@ export const parser: ParserDefinition = {
       );
     }
 
-    db.setService({ id: serviceId, label: labelOf(doc.service, serviceId) });
+    db.setServices(services);
     db.setHub({ id: hubId, label: labelOf(doc.hub, hubId) });
     db.setEvent({ id: eventId, label: labelOf(doc.event, eventId), interval, showPath, from, to });
   },

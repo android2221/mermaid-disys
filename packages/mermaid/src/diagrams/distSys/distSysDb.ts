@@ -11,7 +11,7 @@ import {
 import type { DistSysEvent, DistSysHub, DistSysService } from './distSysTypes.js';
 
 export class DistSysDB implements DiagramDB {
-  private service?: DistSysService;
+  private services: DistSysService[] = [];
   private hub?: DistSysHub;
   private event?: DistSysEvent;
   private diagramId = '';
@@ -24,7 +24,7 @@ export class DistSysDB implements DiagramDB {
   }
 
   public clear(): void {
-    this.service = undefined;
+    this.services = [];
     this.hub = undefined;
     this.event = undefined;
     this.diagramId = '';
@@ -40,12 +40,12 @@ export class DistSysDB implements DiagramDB {
     return this.diagramId;
   }
 
-  public setService(service: DistSysService): void {
-    this.service = service;
+  public setServices(services: DistSysService[]): void {
+    this.services = services;
   }
 
-  public getService(): DistSysService | undefined {
-    return this.service;
+  public getServices(): DistSysService[] {
+    return this.services;
   }
 
   public setHub(hub: DistSysHub): void {

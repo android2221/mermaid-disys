@@ -23,9 +23,9 @@
     <h2>Basic stream (service &rarr; hub)</h2>
     <pre class="mermaid">
 distsys-beta
-service:
-  id: orders
-  label: Order Service
+services:
+  - id: orders
+    label: Order Service
 hub:
   id: bus
   label: Event Hub
@@ -45,9 +45,9 @@ event:
     </p>
     <pre class="mermaid">
 distsys-beta
-service:
-  id: orders
-  label: Order Service
+services:
+  - id: orders
+    label: Order Service
 hub:
   id: bus
   label: Event Hub
@@ -60,12 +60,37 @@ event:
     </pre>
     <hr />
 
+    <h2>Multiple services, direct service &rarr; service line</h2>
+    <p>
+      <code>event.from</code>/<code>event.to</code> also work between two services directly,
+      bypassing the hub entirely &mdash; the hub still renders (spanning both services) but this
+      particular event's line runs straight across.
+    </p>
+    <pre class="mermaid">
+distsys-beta
+services:
+  - id: orders
+    label: Order Service
+  - id: payments
+    label: Payment Service
+hub:
+  id: bus
+  label: Event Hub
+event:
+  id: payment-requested
+  label: PaymentRequested
+  interval: 500
+  from: orders
+  to: payments
+    </pre>
+    <hr />
+
     <h2>Slower interval</h2>
     <pre class="mermaid">
 distsys-beta
-service:
-  id: payments
-  label: Payment Service
+services:
+  - id: payments
+    label: Payment Service
 hub:
   id: bus
   label: Event Hub
@@ -81,9 +106,9 @@ event:
     <h2>Line hidden, orbs still flow (<code>event.showPath: false</code>)</h2>
     <pre class="mermaid">
 distsys-beta
-service:
-  id: analytics
-  label: Analytics Service
+services:
+  - id: analytics
+    label: Analytics Service
 hub:
   id: bus
   label: Event Hub
@@ -115,9 +140,9 @@ event:
       mermaid.initialize({ startOnLoad: true, logLevel: 3, securityLevel: 'loose' });
 
       const src = `distsys-beta
-service:
-  id: inventory
-  label: Inventory Service
+services:
+  - id: inventory
+    label: Inventory Service
 hub:
   id: bus
   label: Event Hub
