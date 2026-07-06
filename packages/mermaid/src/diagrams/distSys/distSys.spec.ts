@@ -344,6 +344,133 @@ events:
 `;
     await expect(parser.parse(input)).rejects.toThrow(/disjoint/);
   });
+
+  it('defaults to an empty calls list when omitted', async () => {
+    const input = `distsys-beta
+services:
+  - id: orders
+hub:
+  id: bus
+events:
+  - id: order-created
+    from: orders
+    to: bus
+`;
+    await parser.parse(input);
+    expect(db.getCalls()).toEqual([]);
+  });
+
+  it('parses a plain service<->service call', async () => {
+    const input = `distsys-beta
+services:
+  - id: orders
+    label: Order Service
+  - id: payments
+    label: Payment Service
+hub:
+  id: bus
+events:
+  - id: order-created
+    from: orders
+    to: bus
+calls:
+  - from: orders
+    to: payments
+    label: validate
+`;
+    await parser.parse(input);
+    expect(db.getCalls()).toEqual([{ from: 'orders', to: 'payments', label: 'validate', bidirectional: false }]);
+  });
+
+  it('parses calls[].bidirectional and an unlabeled call', async () => {
+    const input = `distsys-beta
+services:
+  - id: orders
+  - id: payments
+hub:
+  id: bus
+events:
+  - id: order-created
+    from: orders
+    to: bus
+calls:
+  - from: orders
+    to: payments
+    bidirectional: true
+`;
+    await parser.parse(input);
+    expect(db.getCalls()).toEqual([{ from: 'orders', to: 'payments', label: undefined, bidirectional: true }]);
+  });
+
+  it('throws when calls[].from references an unknown service', async () => {
+    const input = `distsys-beta
+services:
+  - id: orders
+hub:
+  id: bus
+events:
+  - id: order-created
+    from: orders
+    to: bus
+calls:
+  - from: nope
+    to: orders
+`;
+    await expect(parser.parse(input)).rejects.toThrow(/unknown service id/);
+  });
+
+  it('throws when calls[].from references the hub', async () => {
+    const input = `distsys-beta
+services:
+  - id: orders
+hub:
+  id: bus
+events:
+  - id: order-created
+    from: orders
+    to: bus
+calls:
+  - from: bus
+    to: orders
+`;
+    await expect(parser.parse(input)).rejects.toThrow(/unknown service id/);
+  });
+
+  it('throws when calls[].from and .to are the same service', async () => {
+    const input = `distsys-beta
+services:
+  - id: orders
+hub:
+  id: bus
+events:
+  - id: order-created
+    from: orders
+    to: bus
+calls:
+  - from: orders
+    to: orders
+`;
+    await expect(parser.parse(input)).rejects.toThrow(/different services/);
+  });
+
+  it('throws when calls[].bidirectional is not a boolean', async () => {
+    const input = `distsys-beta
+services:
+  - id: orders
+  - id: payments
+hub:
+  id: bus
+events:
+  - id: order-created
+    from: orders
+    to: bus
+calls:
+  - from: orders
+    to: payments
+    bidirectional: yes
+`;
+    await expect(parser.parse(input)).rejects.toThrow(/bidirectional/);
+  });
 });
 
 describe('distSys animator', () => {

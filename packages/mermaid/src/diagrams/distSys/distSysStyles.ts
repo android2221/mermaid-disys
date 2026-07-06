@@ -23,6 +23,13 @@ const getStyles: DiagramStylesProvider = () => `
     fill: none;
   }
 
+  .distsys-call {
+    stroke: #333333;
+    stroke-width: 1.5px;
+    stroke-dasharray: 5 4;
+    fill: none;
+  }
+
   .distsys-arrow {
     fill: #333333;
   }

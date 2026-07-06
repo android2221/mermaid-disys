@@ -21,3 +21,13 @@ export interface DistSysEvent {
   /** Ids of the node(s) this event is delivered to (a `service.id` or `hub.id`). */
   to: string[];
 }
+
+/** A static service<->service relationship: just a line, no orb — for indicating that two
+ * services call each other without modeling a specific animated event. */
+export interface DistSysCall {
+  from: string;
+  to: string;
+  label?: string;
+  /** Draws an arrowhead at both ends instead of just at `to`. */
+  bidirectional: boolean;
+}

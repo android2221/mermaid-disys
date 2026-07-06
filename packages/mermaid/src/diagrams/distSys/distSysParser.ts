@@ -17,10 +17,18 @@ interface DistSysYamlEvent extends DistSysYamlNode {
   to?: unknown;
 }
 
+interface DistSysYamlCall {
+  from?: unknown;
+  to?: unknown;
+  label?: unknown;
+  bidirectional?: unknown;
+}
+
 interface DistSysYamlDoc {
   services?: unknown;
   hub?: DistSysYamlNode;
   events?: unknown;
+  calls?: unknown;
 }
 
 const requireId = (node: DistSysYamlNode | undefined, field: string): string => {
@@ -130,6 +138,64 @@ const parseEvents = (value: unknown, knownIds: Set<string>): ParsedDistSysEvent[
   });
 };
 
+interface ParsedDistSysCall {
+  from: string;
+  to: string;
+  label?: string;
+  bidirectional: boolean;
+}
+
+/** `calls` is an optional YAML sequence of plain service<->service relationships — just a line,
+ * no orb. Unlike `events`, `from`/`to` are single ids and must both be `services[].id` (never
+ * the hub); use `events` for anything that should flow through the hub. */
+const parseCalls = (value: unknown, serviceIds: Set<string>): ParsedDistSysCall[] => {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(
+      'distsys diagram requires `calls` to be a list, e.g.\n' +
+        'calls:\n  - from: orders\n    to: payments'
+    );
+  }
+  return value.map((raw, index) => {
+    const node = raw as DistSysYamlCall | undefined;
+    if (!node || typeof node.from !== 'string' || node.from.trim() === '') {
+      throw new Error(`distsys diagram requires \`calls[${index}].from\` to be set to a non-empty string`);
+    }
+    if (typeof node.to !== 'string' || node.to.trim() === '') {
+      throw new Error(`distsys diagram requires \`calls[${index}].to\` to be set to a non-empty string`);
+    }
+    if (!serviceIds.has(node.from)) {
+      throw new Error(
+        `distsys diagram: \`calls[${index}].from\` references unknown service id \`${node.from}\` ` +
+          '(calls only connect services; use `events` to involve the hub)'
+      );
+    }
+    if (!serviceIds.has(node.to)) {
+      throw new Error(
+        `distsys diagram: \`calls[${index}].to\` references unknown service id \`${node.to}\` ` +
+          '(calls only connect services; use `events` to involve the hub)'
+      );
+    }
+    if (node.from === node.to) {
+      throw new Error(`distsys diagram requires \`calls[${index}].from\` and \`.to\` to be different services`);
+    }
+    if (node.label !== undefined && (typeof node.label !== 'string' || node.label.trim() === '')) {
+      throw new Error(`distsys diagram requires \`calls[${index}].label\` to be a non-empty string when set`);
+    }
+    if (node.bidirectional !== undefined && typeof node.bidirectional !== 'boolean') {
+      throw new Error(`distsys diagram requires \`calls[${index}].bidirectional\` to be a boolean`);
+    }
+    return {
+      from: node.from,
+      to: node.to,
+      label: typeof node.label === 'string' ? node.label : undefined,
+      bidirectional: node.bidirectional ?? false,
+    };
+  });
+};
+
 export const parser: ParserDefinition = {
   parser: {
     // @ts-expect-error - DistSysDB is not assignable to DiagramDB
@@ -173,9 +239,12 @@ export const parser: ParserDefinition = {
 
     const knownIds = new Set([hubId, ...services.map((s) => s.id)]);
     const events = parseEvents(doc.events, knownIds);
+    const serviceIds = new Set(services.map((s) => s.id));
+    const calls = parseCalls(doc.calls, serviceIds);
 
     db.setServices(services);
     db.setHub({ id: hubId, label: labelOf(doc.hub, hubId) });
     db.setEvents(events);
+    db.setCalls(calls);
   },
 };
