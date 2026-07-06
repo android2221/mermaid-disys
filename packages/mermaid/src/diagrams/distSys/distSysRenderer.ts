@@ -224,11 +224,27 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
   const hubX = (contentWidth - hubWidth) / 2;
   const servicesStartX = (contentWidth - servicesWidth) / 2;
 
-  // Grow each service box's height when crossing connectors need lanes to stack in below the
-  // label, so every service stays the same height and the lanes never spill outside the box.
-  const crossingExtraHeight =
-    crossingTierCount > 0 ? CROSSING_LANE_GAP + crossingTierCount * CROSSING_LANE_HEIGHT : 0;
-  const effectiveNodeHeight = NODE_HEIGHT + crossingExtraHeight;
+  // Only a service that's actually an endpoint of a crossing connector needs to grow tall
+  // enough to reach that connector's lane — an intervening service the lane merely passes
+  // under stays its normal height, so the lane runs beneath it rather than through it. A
+  // service that's an endpoint of several crossing connectors grows to reach the deepest one.
+  const serviceMaxCrossingTier = new Map<number, number>();
+  connectorItems.forEach(({ fromEnd, toEnd }, i) => {
+    const tier = crossingTierOf.get(i);
+    if (tier === undefined) {
+      return;
+    }
+    const fromIndex = (fromEnd as { index: number }).index;
+    const toIndex = (toEnd as { index: number }).index;
+    serviceMaxCrossingTier.set(fromIndex, Math.max(serviceMaxCrossingTier.get(fromIndex) ?? -1, tier));
+    serviceMaxCrossingTier.set(toIndex, Math.max(serviceMaxCrossingTier.get(toIndex) ?? -1, tier));
+  });
+  const serviceHeights = services.map((_, index) => {
+    const maxTier = serviceMaxCrossingTier.get(index);
+    return maxTier === undefined
+      ? NODE_HEIGHT
+      : NODE_HEIGHT + CROSSING_LANE_GAP + (maxTier + 1) * CROSSING_LANE_HEIGHT;
+  });
 
   const hubY = MARGIN_Y;
   const hubBottom = hubY + HUB_HEIGHT;
@@ -281,13 +297,15 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
 
     if (crossingTierOf.has(i)) {
       // Not adjacent — instead of a straight line through whatever sits between the two
-      // services, route it through its own lane low in the (taller) service boxes, below where
-      // any label sits, so it reads as passing underneath rather than through them. Each
-      // crossing connector stacks in its own lane, in encounter order.
+      // services, route it through its own lane low in the two endpoint boxes (which grew tall
+      // enough to reach it), entering and leaving at their facing edges just like an adjacent
+      // connector, so it never appears to originate from inside a box. Any box in between stays
+      // its normal (shorter) height, so the lane passes beneath it rather than through it.
       const tier = crossingTierOf.get(i)!;
       const laneY = serviceY + NODE_HEIGHT + CROSSING_LANE_GAP + tier * CROSSING_LANE_HEIGHT;
-      const fromX = fromBox.centerX;
-      const toX = toBox.centerX;
+      const goesRight = fromBox.centerX < toBox.centerX;
+      const fromX = goesRight ? fromBox.x + fromBox.width : fromBox.x;
+      const toX = goesRight ? toBox.x : toBox.x + toBox.width;
       const labelX = (fromX + toX) / 2;
       const labelY = laneY - ROW_LINE_TO_LABEL_GAP;
       return {
@@ -332,7 +350,7 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
   // reaches furthest, then shift everything so the leftmost content sits at MARGIN_X.
   let minX = Math.min(hubX, servicesStartX);
   let maxX = Math.max(hubX + hubWidth, servicesStartX + servicesWidth);
-  let maxY = serviceY + effectiveNodeHeight;
+  let maxY = serviceY + Math.max(NODE_HEIGHT, ...serviceHeights);
   geometry.forEach((g) => {
     minX = Math.min(minX, g.labelLeft, g.startX, g.endX);
     maxX = Math.max(maxX, g.labelRight, g.startX, g.endX);
@@ -399,7 +417,7 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
       .attr('x', shift(box.x))
       .attr('y', serviceY)
       .attr('width', box.width)
-      .attr('height', effectiveNodeHeight)
+      .attr('height', serviceHeights[index])
       .attr('rx', 6);
     text.attr('x', shift(box.centerX)).attr('y', serviceCenterY);
   });
