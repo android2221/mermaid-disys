@@ -21,6 +21,9 @@ const LABEL_TEXT_HALF_HEIGHT = 7;
 const PARALLEL_OFFSET = 16;
 const ROW_LINE_TO_LABEL_GAP = 14;
 const ROW_SPACING = 32;
+const OVERPASS_BASE_GAP = 24;
+const OVERPASS_TIER_HEIGHT = 34;
+const OVERPASS_TOP_CLEARANCE = 20;
 const TOKEN_RADIUS = 7;
 const TRAVEL_DURATION_MS = 900;
 
@@ -129,6 +132,18 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     return { indexInGroup: list.indexOf(i), groupSize: list.length };
   });
 
+  // EXPERIMENTAL: a service<->service connector whose two services aren't adjacent would
+  // otherwise draw straight through whatever sits between them. Instead, route it as an
+  // "overpass" — up from the service row, across, back down — stacked in encounter order so
+  // multiple such connectors don't collide with each other.
+  const crossingTierOf = new Map<number, number>();
+  connectorItems.forEach(({ fromEnd, toEnd }, i) => {
+    if (fromEnd.kind === 'service' && toEnd.kind === 'service' && Math.abs(fromEnd.index - toEnd.index) > 1) {
+      crossingTierOf.set(i, crossingTierOf.size);
+    }
+  });
+  const crossingTierCount = crossingTierOf.size;
+
   const svg: SVG = selectSvgElement(id);
 
   const markerId = `${id}-distsys-arrow`;
@@ -210,9 +225,17 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
   const hubX = (contentWidth - hubWidth) / 2;
   const servicesStartX = (contentWidth - servicesWidth) / 2;
 
+  // Grow the gap above the service row when overpasses need room to stack, so the highest
+  // tier still clears the hub with margin to spare.
+  const requiredGapY =
+    crossingTierCount > 0
+      ? OVERPASS_BASE_GAP + crossingTierCount * OVERPASS_TIER_HEIGHT + OVERPASS_TOP_CLEARANCE
+      : GAP_Y;
+  const effectiveGapY = Math.max(GAP_Y, requiredGapY);
+
   const hubY = MARGIN_Y;
   const hubBottom = hubY + HUB_HEIGHT;
-  const serviceY = hubBottom + GAP_Y;
+  const serviceY = hubBottom + effectiveGapY;
   const serviceCenterY = serviceY + NODE_HEIGHT / 2;
 
   // Lay out services left-to-right, then record each one's box + center for path routing.
@@ -256,14 +279,44 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
         labelRight: cx + labelWidth / 2,
       };
     }
+    const fromBox = serviceBoxes[(fromEnd as { index: number }).index];
+    const toBox = serviceBoxes[(toEnd as { index: number }).index];
+
+    if (crossingTierOf.has(i)) {
+      // EXPERIMENTAL: not adjacent — go up from the row, across above whatever's in between,
+      // and back down, instead of straight through it. Tiers stack higher for each additional
+      // overpass so they don't collide with one another.
+      const tier = crossingTierOf.get(i)!;
+      const overpassY = serviceY - OVERPASS_BASE_GAP - tier * OVERPASS_TIER_HEIGHT;
+      const fromX = fromBox.centerX;
+      const toX = toBox.centerX;
+      const labelX = (fromX + toX) / 2;
+      const labelY = overpassY - ROW_LINE_TO_LABEL_GAP;
+      return {
+        startX: fromX,
+        endX: toX,
+        startY: serviceY,
+        endY: serviceY,
+        points: [
+          { x: fromX, y: serviceY },
+          { x: fromX, y: overpassY },
+          { x: toX, y: overpassY },
+          { x: toX, y: serviceY },
+        ],
+        labelX,
+        labelY,
+        labelAnchor: 'middle' as const,
+        labelLeft: labelX - labelWidth / 2,
+        labelRight: labelX + labelWidth / 2,
+      };
+    }
+
     // Service<->service: a direct horizontal line between the two boxes' facing sides, staying
     // within their shared row (the gap between two adjacent boxes has no other content in it,
     // so the line and its label can live there without touching either box's own text) —
     // keeping it visually between the services rather than relocated elsewhere. Connectors
     // sharing this pair spread out around the row's center; each one's label sits directly
     // below its own line, so scanning down reads as line, label, line, label.
-    const fromBox = serviceBoxes[(fromEnd as { index: number }).index];
-    const toBox = serviceBoxes[(toEnd as { index: number }).index];
     const goesRight = fromBox.centerX < toBox.centerX;
     const startX = goesRight ? fromBox.x + fromBox.width : fromBox.x;
     const endX = goesRight ? toBox.x : toBox.x + toBox.width;
@@ -318,10 +371,15 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
 
   geometry.forEach((g, i) => {
     const item = connectorItems[i];
+    // Most connectors are a simple two-point line; an overpass supplies its own multi-point
+    // route (up, across, down) via `points`.
+    const d = g.points
+      ? g.points.map((p, idx) => `${idx === 0 ? 'M' : 'L'}${shift(p.x)},${p.y}`).join(' ')
+      : `M${shift(g.startX)},${g.startY} L${shift(g.endX)},${g.endY}`;
     const path = pathG
       .insert('path', 'text')
       .attr('id', domIds[i].pathId)
-      .attr('d', `M${shift(g.startX)},${g.startY} L${shift(g.endX)},${g.endY}`)
+      .attr('d', d)
       .attr('marker-end', `url(#${markerId})`)
       .attr('class', item.kind === 'event' ? 'distsys-edge' : 'distsys-call');
     if (item.kind === 'call' && item.call.bidirectional) {
