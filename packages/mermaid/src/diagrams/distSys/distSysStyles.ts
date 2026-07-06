@@ -18,7 +18,7 @@ const getStyles: DiagramStylesProvider = () => `
   }
 
   .distsys-edge {
-    stroke: #333333;
+    stroke: var(--distsys-color, #333333);
     stroke-width: 1.5px;
     fill: none;
   }
@@ -40,8 +40,8 @@ const getStyles: DiagramStylesProvider = () => `
   }
 
   .distsys-token {
-    fill: #FF6B6B;
-    stroke: #B33333;
+    fill: var(--distsys-color, #FF6B6B);
+    stroke: var(--distsys-color, #B33333);
     stroke-width: 1px;
   }
 `;

@@ -4,7 +4,7 @@ import { selectSvgElement } from '../../rendering-util/selectSvgElement.js';
 import { configureSvgSize } from '../../setupGraphViewbox.js';
 import { attachDistSysAnimation, type DistSysAnimationController } from './distSysAnimator.js';
 import type { DistSysDB } from './distSysDb.js';
-import type { DistSysCall, DistSysEvent } from './distSysTypes.js';
+import type { DistSysCall } from './distSysTypes.js';
 
 const MARGIN_X = 60;
 const MARGIN_Y = 36;
@@ -38,7 +38,17 @@ const measureWidth = (el: SVGGraphicsElement): number => {
 type Endpoint = { kind: 'hub' } | { kind: 'service'; index: number };
 
 type ConnectorItem =
-  | { kind: 'event'; event: DistSysEvent; fromEnd: Endpoint; toEnd: Endpoint }
+  | {
+      kind: 'event';
+      eventId: string;
+      routeIndex: number;
+      label: string;
+      interval: number;
+      showPath: boolean;
+      color?: string;
+      fromEnd: Endpoint;
+      toEnd: Endpoint;
+    }
   | { kind: 'call'; call: DistSysCall; fromEnd: Endpoint; toEnd: Endpoint };
 
 /** Two connectors sharing the same pair of nodes (regardless of direction) share this key, so
@@ -65,8 +75,8 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     throw new Error('distsys diagram requires `services`, `hub`, and `events` blocks');
   }
 
-  // The parser guarantees each event's from/to are known, disjoint ids, so exactly one of the
-  // two resolves to the hub (a hub<->service event) or neither does (a service<->service event).
+  // The parser guarantees each route's from/to are known, distinct ids, so exactly one of the
+  // two resolves to the hub (a hub<->service route) or neither does (a service<->service route).
   // Calls are always service<->service (the parser rejects a hub reference in `calls`).
   const resolveEndpoint = (refId: string): Endpoint => {
     if (refId === hub.id) {
@@ -76,14 +86,23 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     return { kind: 'service', index };
   };
 
+  // Each event is declared once (id, label, interval, color) but can carry several routes — one
+  // ConnectorItem per route, all sharing that event's styling and animation timing.
   const connectorItems: ConnectorItem[] = [
-    ...events.map(
-      (event): ConnectorItem => ({
-        kind: 'event',
-        event,
-        fromEnd: resolveEndpoint(event.from[0]),
-        toEnd: resolveEndpoint(event.to[0]),
-      })
+    ...events.flatMap((event) =>
+      event.routes.map(
+        (route, routeIndex): ConnectorItem => ({
+          kind: 'event',
+          eventId: event.id,
+          routeIndex,
+          label: route.label,
+          interval: event.interval,
+          showPath: event.showPath,
+          color: event.color,
+          fromEnd: resolveEndpoint(route.from),
+          toEnd: resolveEndpoint(route.to),
+        })
+      )
     ),
     ...calls.map(
       (call): ConnectorItem => ({
@@ -148,8 +167,7 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
   });
 
   const pathG = svg.append('g').attr('class', 'distsys-path');
-  const labelTextOf = (item: ConnectorItem): string =>
-    item.kind === 'event' ? item.event.label : (item.call.label ?? '');
+  const labelTextOf = (item: ConnectorItem): string => (item.kind === 'event' ? item.label : (item.call.label ?? ''));
   const connectorLabelTexts = connectorItems.map((item) =>
     pathG
       .append('text')
@@ -284,13 +302,13 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
   configureSvgSize(svg, height, width, db.getConfig().useMaxWidth);
 
   // Only events get a token group + animation controller; calls are static, so they only need a
-  // path id.
+  // path id. Each route gets its own path/tokens ids, keyed by event id + route index.
   let callIndex = 0;
   const domIds = connectorItems.map((item) => {
     if (item.kind === 'event') {
       return {
-        pathId: `${id}-distsys-event-path-${item.event.id}`,
-        tokensId: `${id}-distsys-tokens-${item.event.id}`,
+        pathId: `${id}-distsys-event-path-${item.eventId}-${item.routeIndex}`,
+        tokensId: `${id}-distsys-tokens-${item.eventId}-${item.routeIndex}`,
       };
     }
     const pathId = `${id}-distsys-call-path-${callIndex}`;
@@ -310,6 +328,12 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
       // The marker's `orient="auto-start-reverse"` makes reusing it as marker-start point
       // outward too, giving a double-headed arrow with no second marker definition needed.
       path.attr('marker-start', `url(#${markerId})`);
+    }
+    if (item.kind === 'event' && item.color) {
+      // The arrowhead marker can't inherit this — SVG markers inherit CSS from their own
+      // position in <defs>, not from the path referencing them — so only the line and the
+      // orb (via the same custom property on its token group, set below) pick up the color.
+      path.style('--distsys-color', item.color);
     }
     connectorLabelTexts[i].attr('text-anchor', g.labelAnchor).attr('x', shift(g.labelX)).attr('y', g.labelY);
   });
@@ -334,8 +358,15 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     text.attr('x', shift(box.centerX)).attr('y', serviceCenterY);
   });
 
-  events.forEach((event) => {
-    svg.append('g').attr('class', 'distsys-tokens').attr('id', `${id}-distsys-tokens-${event.id}`);
+  connectorItems.forEach((item, i) => {
+    if (item.kind !== 'event') {
+      return;
+    }
+    // Event items always have a tokensId (only calls omit one) — see the domIds map above.
+    const tokens = svg.append('g').attr('class', 'distsys-tokens').attr('id', domIds[i].tokensId!);
+    if (item.color) {
+      tokens.style('--distsys-color', item.color);
+    }
   });
 
   // The animation only runs once this SVG is live in the page — see distSysAnimator.ts.
@@ -348,17 +379,22 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     if (!svgEl) {
       return;
     }
+    // Keyed as `eventId[routeIndex]` so `svgEl.distSys.events['id[0]']` reaches one specific
+    // route even when several routes share the same event id.
     const controllersById: Record<string, DistSysAnimationController> = {};
-    events.forEach((event) => {
-      controllersById[event.id] = attachDistSysAnimation({
+    connectorItems.forEach((item, i) => {
+      if (item.kind !== 'event') {
+        return;
+      }
+      controllersById[`${item.eventId}[${item.routeIndex}]`] = attachDistSysAnimation({
         svg: svgEl,
-        pathSelector: `#${id}-distsys-event-path-${event.id}`,
-        tokenGroupSelector: `#${id}-distsys-tokens-${event.id}`,
-        interval: event.interval,
+        pathSelector: `#${domIds[i].pathId}`,
+        tokenGroupSelector: `#${domIds[i].tokensId}`,
+        interval: item.interval,
         travelDuration: TRAVEL_DURATION_MS,
         tokenRadius: TOKEN_RADIUS,
         tokenClass: 'distsys-token',
-        pathVisible: event.showPath,
+        pathVisible: item.showPath,
       });
     });
     const controllerList = Object.values(controllersById);

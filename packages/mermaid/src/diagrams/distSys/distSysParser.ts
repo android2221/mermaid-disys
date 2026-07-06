@@ -10,11 +10,17 @@ interface DistSysYamlNode {
   label?: unknown;
 }
 
+interface DistSysYamlRoute {
+  from?: unknown;
+  to?: unknown;
+  label?: unknown;
+}
+
 interface DistSysYamlEvent extends DistSysYamlNode {
   interval?: unknown;
   showPath?: unknown;
-  from?: unknown;
-  to?: unknown;
+  color?: unknown;
+  routes?: unknown;
 }
 
 interface DistSysYamlCall {
@@ -62,17 +68,82 @@ const parseServices = (value: unknown): { id: string; label: string }[] => {
   });
 };
 
-/** Accepts either a single id or a YAML sequence of ids and normalizes to a non-empty string[]. */
-const requireIds = (value: unknown, field: string): string[] => {
-  const arr = value === undefined ? [] : Array.isArray(value) ? value : [value];
-  if (arr.length === 0) {
-    throw new Error(`distsys diagram requires \`${field}\` to be set to an id or list of ids`);
+const HEX_COLOR_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
+/** Accepts a hex code (`#rgb`/`#rrggbb`) or trusts any other non-empty string as a CSS color
+ * name — there are too many valid keywords to enumerate, so only the `#`-prefixed form is
+ * validated strictly. */
+const parseColor = (value: unknown, index: number): string | undefined => {
+  if (value === undefined) {
+    return undefined;
   }
-  return arr.map((item) => {
-    if (typeof item !== 'string' || item.trim() === '') {
-      throw new Error(`distsys diagram requires every entry in \`${field}\` to be a non-empty string`);
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(
+      `distsys diagram requires \`events[${index}].color\` to be a non-empty string ` +
+        '(a hex code or CSS color name) when set'
+    );
+  }
+  if (value.startsWith('#') && !HEX_COLOR_RE.test(value)) {
+    throw new Error(
+      `distsys diagram: \`events[${index}].color\` \`${value}\` is not a valid hex color ` +
+        '(expected `#rgb` or `#rrggbb`)'
+    );
+  }
+  return value;
+};
+
+interface ParsedDistSysRoute {
+  from: string;
+  to: string;
+  label: string;
+}
+
+/** `events[].routes` is a non-empty YAML sequence of `{from, to, label?}` hops; `label` falls
+ * back to the event's own label when omitted. */
+const parseRoutes = (
+  value: unknown,
+  knownIds: Set<string>,
+  eventIndex: number,
+  defaultLabel: string
+): ParsedDistSysRoute[] => {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(
+      `distsys diagram requires \`events[${eventIndex}].routes\` to be a non-empty list, e.g.\n` +
+        '  routes:\n    - from: orders\n      to: bus'
+    );
+  }
+  return value.map((raw, routeIndex) => {
+    const node = raw as DistSysYamlRoute | undefined;
+    const field = `events[${eventIndex}].routes[${routeIndex}]`;
+    if (!node || typeof node.from !== 'string' || node.from.trim() === '') {
+      throw new Error(`distsys diagram requires \`${field}.from\` to be set to a non-empty string`);
     }
-    return item;
+    if (typeof node.to !== 'string' || node.to.trim() === '') {
+      throw new Error(`distsys diagram requires \`${field}.to\` to be set to a non-empty string`);
+    }
+    if (!knownIds.has(node.from)) {
+      throw new Error(
+        `distsys diagram: \`${field}.from\` references unknown id \`${node.from}\` ` +
+          `(expected one of: ${[...knownIds].map((known) => `\`${known}\``).join(', ')})`
+      );
+    }
+    if (!knownIds.has(node.to)) {
+      throw new Error(
+        `distsys diagram: \`${field}.to\` references unknown id \`${node.to}\` ` +
+          `(expected one of: ${[...knownIds].map((known) => `\`${known}\``).join(', ')})`
+      );
+    }
+    if (node.from === node.to) {
+      throw new Error(`distsys diagram requires \`${field}.from\` and \`.to\` to be different`);
+    }
+    if (node.label !== undefined && (typeof node.label !== 'string' || node.label.trim() === '')) {
+      throw new Error(`distsys diagram requires \`${field}.label\` to be a non-empty string when set`);
+    }
+    return {
+      from: node.from,
+      to: node.to,
+      label: typeof node.label === 'string' ? node.label : defaultLabel,
+    };
   });
 };
 
@@ -81,16 +152,17 @@ interface ParsedDistSysEvent {
   label: string;
   interval: number;
   showPath: boolean;
-  from: string[];
-  to: string[];
+  color?: string;
+  routes: ParsedDistSysRoute[];
 }
 
-/** `events` is a YAML sequence of event blocks; each one's `from`/`to` must reference known ids. */
+/** `events` is a YAML sequence of event blocks; each one is declared once (a stable id, label,
+ * interval, color) and carries a `routes` list of the from/to hops it travels. */
 const parseEvents = (value: unknown, knownIds: Set<string>): ParsedDistSysEvent[] => {
   if (!Array.isArray(value) || value.length === 0) {
     throw new Error(
       'distsys diagram requires `events` to be a non-empty list, e.g.\n' +
-        'events:\n  - id: order-created\n    label: OrderCreated\n    from: orders\n    to: bus'
+        'events:\n  - id: order-created\n    label: OrderCreated\n    routes:\n      - from: orders\n        to: bus'
     );
   }
   const seenIds = new Set<string>();
@@ -117,24 +189,11 @@ const parseEvents = (value: unknown, knownIds: Set<string>): ParsedDistSysEvent[
     }
     const showPath = rawShowPath ?? true;
 
-    const from = requireIds(node?.from, `events[${index}].from`);
-    const to = requireIds(node?.to, `events[${index}].to`);
-    for (const refId of [...from, ...to]) {
-      if (!knownIds.has(refId)) {
-        throw new Error(
-          `distsys diagram: \`events[${index}].from\`/\`.to\` reference unknown id \`${refId}\` ` +
-            `(expected one of: ${[...knownIds].map((known) => `\`${known}\``).join(', ')})`
-        );
-      }
-    }
-    if (from.some((refId) => to.includes(refId))) {
-      throw new Error(
-        `distsys diagram requires \`events[${index}].from\` and \`.to\` to be disjoint ` +
-          '(an event cannot go from a node to itself)'
-      );
-    }
+    const label = labelOf(node, id);
+    const color = parseColor(node?.color, index);
+    const routes = parseRoutes(node?.routes, knownIds, index, label);
 
-    return { id, label: labelOf(node, id), interval, showPath, from, to };
+    return { id, label, interval, showPath, color, routes };
   });
 };
 
@@ -226,7 +285,7 @@ export const parser: ParserDefinition = {
           'services:\n  - id: orders\n    label: Order Service\n' +
           'hub:\n  id: bus\n  label: Event Hub\n' +
           'events:\n  - id: order-created\n    label: OrderCreated\n    interval: 1000\n' +
-          '    from: orders\n    to: bus'
+          '    routes:\n      - from: orders\n        to: bus'
       );
     }
 

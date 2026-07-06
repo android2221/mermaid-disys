@@ -33,16 +33,19 @@ events:
   - id: order-created
     label: OrderCreated
     interval: 300
-    from: orders
-    to: bus
+    routes:
+      - from: orders
+        to: bus
     </pre>
     <hr />
 
-    <h2>Round trip: service &rarr; hub, then hub &rarr; service</h2>
+    <h2>One event, two routes: service &rarr; hub, then hub &rarr; service</h2>
     <p>
-      <code>events</code> is a list &mdash; two events between the same service and hub, going
-      opposite directions, render as two parallel lines instead of overlapping, and animate
-      independently.
+      An event is declared once &mdash; a stable <code>id</code>, <code>label</code>,
+      <code>interval</code>, and (optionally) <code>color</code> &mdash; and carries a
+      <code>routes</code> list underneath. Two routes between the same service and hub, going
+      opposite directions, render as two parallel lines instead of overlapping, each animating
+      independently. Each route can override the shared label with its own.
     </p>
     <pre class="mermaid">
 distsys-beta
@@ -53,24 +56,58 @@ hub:
   id: bus
   label: Event Hub
 events:
+  - id: order-lifecycle
+    label: OrderLifecycle
+    interval: 500
+    routes:
+      - from: orders
+        to: bus
+        label: OrderCreated
+      - from: bus
+        to: orders
+        label: OrderConfirmed
+    </pre>
+    <hr />
+
+    <h2>Color-coded events</h2>
+    <p>
+      <code>event.color</code> accepts a hex code or a CSS color name, recoloring that event's
+      line(s) and orb(s) &mdash; useful for telling several event types apart at a glance. The
+      arrowhead stays neutral (SVG markers don't inherit color from the path referencing them).
+    </p>
+    <pre class="mermaid">
+distsys-beta
+services:
+  - id: orders
+    label: Order Service
+  - id: payments
+    label: Payment Service
+hub:
+  id: bus
+  label: Event Hub
+events:
   - id: order-created
     label: OrderCreated
     interval: 500
-    from: orders
-    to: bus
-  - id: order-confirmed
-    label: OrderConfirmed
-    interval: 500
-    from: bus
-    to: orders
+    color: "#3b82f6"
+    routes:
+      - from: orders
+        to: bus
+  - id: payment-captured
+    label: PaymentCaptured
+    interval: 700
+    color: mediumseagreen
+    routes:
+      - from: payments
+        to: bus
     </pre>
     <hr />
 
     <h2>Multiple services, direct service &rarr; service line</h2>
     <p>
-      <code>event.from</code>/<code>event.to</code> also work between two services directly,
+      A route's <code>from</code>/<code>to</code> also work between two services directly,
       bypassing the hub entirely &mdash; the hub still renders (spanning both services) but this
-      particular event's line runs straight across.
+      particular route's line runs straight across.
     </p>
     <pre class="mermaid">
 distsys-beta
@@ -86,8 +123,9 @@ events:
   - id: payment-requested
     label: PaymentRequested
     interval: 500
-    from: orders
-    to: payments
+    routes:
+      - from: orders
+        to: payments
     </pre>
     <hr />
 
@@ -104,8 +142,9 @@ events:
   - id: payment-captured
     label: PaymentCaptured
     interval: 1500
-    from: payments
-    to: bus
+    routes:
+      - from: payments
+        to: bus
     </pre>
     <hr />
 
@@ -123,8 +162,9 @@ events:
     label: PageViewed
     interval: 400
     showPath: false
-    from: analytics
-    to: bus
+    routes:
+      - from: analytics
+        to: bus
     </pre>
     <hr />
 
@@ -133,9 +173,9 @@ events:
       <code>mermaidAPI.render()</code> returns <code>bindFunctions</code>; calling it on the live
       SVG attaches a <code>.distSys</code> controller with <code>play()</code>,
       <code>pause()</code>, <code>stop()</code>, and <code>setPathVisible()</code> /
-      <code>togglePath()</code> for the connecting line(s). With multiple events, these apply to
-      all of them at once; <code>svgEl.distSys.events['stock-reserved']</code> reaches a single
-      one.
+      <code>togglePath()</code> for the connecting line(s). With multiple routes, these apply to
+      all of them at once; <code>svgEl.distSys.events['stock-reserved[0]']</code> reaches a
+      single route (keyed as <code>eventId[routeIndex]</code>).
     </p>
     <div id="controlledDiagram"></div>
     <button id="btnPlay">play</button>
@@ -158,8 +198,9 @@ events:
   - id: stock-reserved
     label: StockReserved
     interval: 500
-    from: inventory
-    to: bus
+    routes:
+      - from: inventory
+        to: bus
 `;
       const { svg, bindFunctions } = await mermaid.mermaidAPI.render('controlledGraph', src);
       const mount = document.getElementById('controlledDiagram');
