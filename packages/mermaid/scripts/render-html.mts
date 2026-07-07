@@ -76,13 +76,19 @@ function findBundle(): string {
 const escapeHtml = (text: string): string =>
   text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-function buildHtml(options: { title: string; bundleSource: string; diagramSource: string }): string {
+function buildHtml(options: {
+  title: string;
+  bundleSource: string;
+  diagramSource: string;
+}): string {
   const { title, bundleSource, diagramSource } = options;
 
   if (bundleSource.includes('</script')) {
     // Defensive: would break out of the inline <script> tag below. Not expected in a minified
     // mermaid bundle, but fail loudly rather than silently emit a broken page.
-    throw new Error('mermaid bundle contains a literal "</script" sequence; refusing to inline it.');
+    throw new Error(
+      'mermaid bundle contains a literal "</script" sequence; refusing to inline it.'
+    );
   }
 
   return `<!doctype html>
@@ -117,9 +123,11 @@ function buildHtml(options: { title: string; bundleSource: string; diagramSource
     }
   }
   * { box-sizing: border-box; }
-  body {
+  html, body {
     margin: 0;
-    min-height: 100vh;
+    height: 100%;
+  }
+  body {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -133,14 +141,25 @@ function buildHtml(options: { title: string; bundleSource: string; diagramSource
     border-radius: 10px;
     box-shadow: var(--shadow);
     padding: 28px;
-    max-width: min(92vw, 900px);
+    width: min(96vw, 1800px);
+    height: min(92vh, 1100px);
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 18px;
   }
-  #mount { display: flex; justify-content: center; }
-  #mount svg { max-width: 100%; height: auto; }
+  /* The diagram fills whatever space is left in the panel (below the control bar, when
+     present); the svg itself scales via its own viewBox + preserveAspectRatio to fill that
+     box without distorting, growing small diagrams up as readily as it shrinks big ones down. */
+  #mount {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  #mount svg { width: 100%; height: 100%; }
   .controls { display: flex; gap: 8px; }
   .controls[hidden] { display: none; }
   .controls button {
@@ -179,6 +198,13 @@ ${bundleSource}
     var mount = document.getElementById("mount");
     mount.innerHTML = result.svg;
     var svgEl = mount.querySelector("svg");
+    // Mermaid sets width="100%" plus an inline "max-width: <natural-px>px" style for
+    // responsive embedding — that inline max-width caps the svg at its own intrinsic size no
+    // matter what the stylesheet says, which is what makes a small diagram render tiny here.
+    // Clear it so the #mount svg { width: 100%; height: 100%; } rule above can actually scale
+    // the diagram (up or down) to fill the panel.
+    svgEl.style.maxWidth = "none";
+    svgEl.style.maxHeight = "none";
     if (result.bindFunctions) {
       result.bindFunctions(svgEl);
     }
@@ -210,7 +236,7 @@ ${bundleSource}
 function main() {
   const { inputPath, outputPath, title } = parseArgs(process.argv.slice(2));
 
-  const resolvedInput = resolve(invocationCwd, inputPath!);
+  const resolvedInput = resolve(invocationCwd, inputPath);
   if (!existsSync(resolvedInput)) {
     fail(`Input file not found: ${resolvedInput}`);
   }
