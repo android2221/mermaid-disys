@@ -21,8 +21,16 @@ const LABEL_TEXT_HALF_HEIGHT = 7;
 const PARALLEL_OFFSET = 16;
 const ROW_LINE_TO_LABEL_GAP = 14;
 const ROW_SPACING = 32;
-const CROSSING_LANE_GAP = 14;
-const CROSSING_LANE_HEIGHT = 26;
+// Vertical space from a service box's normal bottom (serviceY + NODE_HEIGHT) down to the first
+// crossing lane's line — this is the clearance a plain (non-participating) box gets below it.
+const CROSSING_LANE_TOP_GAP = 28;
+// Spacing between consecutive stacked crossing lanes.
+const CROSSING_LANE_HEIGHT = 34;
+// Gap from a crossing lane's line up to its own label.
+const CROSSING_LANE_LABEL_GAP = 12;
+// How far an endpoint box's bottom edge extends past its own deepest lane's line. Kept smaller
+// than CROSSING_LANE_HEIGHT so the box's bottom never reaches as far as the next lane down.
+const CROSSING_LANE_TERMINAL_PAD = 14;
 const TOKEN_RADIUS = 7;
 const TRAVEL_DURATION_MS = 900;
 
@@ -243,7 +251,10 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
     const maxTier = serviceMaxCrossingTier.get(index);
     return maxTier === undefined
       ? NODE_HEIGHT
-      : NODE_HEIGHT + CROSSING_LANE_GAP + (maxTier + 1) * CROSSING_LANE_HEIGHT;
+      : NODE_HEIGHT +
+          CROSSING_LANE_TOP_GAP +
+          maxTier * CROSSING_LANE_HEIGHT +
+          CROSSING_LANE_TERMINAL_PAD;
   });
 
   const hubY = MARGIN_Y;
@@ -302,12 +313,12 @@ export const draw: DrawDefinition = (_text, id, _version, diagObj: Diagram) => {
       // connector, so it never appears to originate from inside a box. Any box in between stays
       // its normal (shorter) height, so the lane passes beneath it rather than through it.
       const tier = crossingTierOf.get(i)!;
-      const laneY = serviceY + NODE_HEIGHT + CROSSING_LANE_GAP + tier * CROSSING_LANE_HEIGHT;
+      const laneY = serviceY + NODE_HEIGHT + CROSSING_LANE_TOP_GAP + tier * CROSSING_LANE_HEIGHT;
       const goesRight = fromBox.centerX < toBox.centerX;
       const fromX = goesRight ? fromBox.x + fromBox.width : fromBox.x;
       const toX = goesRight ? toBox.x : toBox.x + toBox.width;
       const labelX = (fromX + toX) / 2;
-      const labelY = laneY - ROW_LINE_TO_LABEL_GAP;
+      const labelY = laneY - CROSSING_LANE_LABEL_GAP;
       return {
         startX: fromX,
         endX: toX,
