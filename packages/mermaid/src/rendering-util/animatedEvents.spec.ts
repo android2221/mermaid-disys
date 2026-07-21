@@ -92,6 +92,68 @@ describe('parseAnimateSpec', () => {
   });
 });
 
+describe('parseAnimateSpec fields block', () => {
+  const base = { events: [{ id: 'user-created', on: { from: 'api', to: 'hub' } }] };
+
+  it('defaults to no fields when the block is absent', () => {
+    expect(parseAnimateSpec(base)[0].fields).toEqual([]);
+  });
+
+  it('parses UML member strings onto the matching event', () => {
+    const events = parseAnimateSpec({
+      ...base,
+      fields: {
+        'user-created': [
+          '+username: string',
+          '-passwordHash: string',
+          '#retries: number',
+          '~traceId',
+        ],
+      },
+    });
+    expect(events[0].fields).toEqual([
+      { visibility: '+', name: 'username', type: 'string' },
+      { visibility: '-', name: 'passwordHash', type: 'string' },
+      { visibility: '#', name: 'retries', type: 'number' },
+      { visibility: '~', name: 'traceId', type: undefined },
+    ]);
+  });
+
+  it('accepts a bare name with no visibility or type', () => {
+    const events = parseAnimateSpec({ ...base, fields: { 'user-created': ['username'] } });
+    expect(events[0].fields).toEqual([
+      { visibility: undefined, name: 'username', type: undefined },
+    ]);
+  });
+
+  it('rejects a fields key that references no declared event', () => {
+    expect(() => parseAnimateSpec({ ...base, fields: { ghost: ['+x: y'] } })).toThrow(
+      /`fields.ghost` references no declared event \(known ids: `user-created`\)/
+    );
+  });
+
+  it('rejects a non-list or empty fields value', () => {
+    expect(() => parseAnimateSpec({ ...base, fields: { 'user-created': 'nope' } })).toThrow(
+      /non-empty list of UML member strings/
+    );
+    expect(() => parseAnimateSpec({ ...base, fields: { 'user-created': [] } })).toThrow(
+      /non-empty list of UML member strings/
+    );
+  });
+
+  it('rejects malformed UML member notation with the offending string', () => {
+    expect(() =>
+      parseAnimateSpec({ ...base, fields: { 'user-created': ['++username string'] } })
+    ).toThrow(/`fields.user-created\[0]` `\+\+username string` is not valid UML member notation/);
+  });
+
+  it('rejects a non-mapping fields block', () => {
+    expect(() => parseAnimateSpec({ ...base, fields: ['+x: y'] })).toThrow(
+      /`fields` to be a mapping of event id/
+    );
+  });
+});
+
 describe('resolveAnimatedEventTarget', () => {
   const targets: AnimatedEventTarget[] = [
     { id: '0', from: 'user', to: 'api', text: 'POST /users' },

@@ -180,6 +180,14 @@ export interface AnimatedEventOn {
   nth?: number;
 }
 
+/** One payload field of an event, parsed from UML member notation (`+username: string`). */
+export interface AnimatedEventField {
+  /** UML visibility marker: `+` public, `-` private, `#` protected, `~` package. */
+  visibility?: '+' | '-' | '#' | '~';
+  name: string;
+  type?: string;
+}
+
 export interface AnimatedEventSpec {
   id: string;
   color?: string;
@@ -187,6 +195,8 @@ export interface AnimatedEventSpec {
   travelDuration: number;
   showPath: boolean;
   on: AnimatedEventOn;
+  /** Payload fields declared in the `animate.fields` block (keyed by this event's id). */
+  fields: AnimatedEventField[];
 }
 
 /** One line a diagram type offers up for animation: a stable id (the diagram derives its DOM
@@ -208,6 +218,64 @@ const requireOptionalString = (value: unknown, field: string): string | undefine
   return value;
 };
 
+/** `+username: string` → visibility `+`, name `username`, type `string`. Visibility and type
+ * are both optional (`username` alone is valid); anything else is a loud error. */
+const UML_FIELD_RE = /^([#+~-])?\s*([A-Z_a-z]\w*)\s*(?::\s*(\S[^]*?))?\s*$/;
+
+const parseUmlField = (raw: unknown, path: string): AnimatedEventField => {
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    throw new Error(
+      `animate frontmatter requires \`${path}\` to be a UML member string like \`+username: string\``
+    );
+  }
+  const match = UML_FIELD_RE.exec(raw.trim());
+  if (!match) {
+    throw new Error(
+      `animate frontmatter: \`${path}\` \`${raw}\` is not valid UML member notation ` +
+        '(expected `[+|-|#|~]name[: type]`, e.g. `+username: string`)'
+    );
+  }
+  const [, visibility, name, type] = match;
+  return {
+    visibility: visibility as AnimatedEventField['visibility'],
+    name,
+    type,
+  };
+};
+
+/** Parses the `animate.fields` block — a mapping of event id to a list of UML member strings —
+ * onto the already-parsed events. Kept separate from `events` so payload shape can live apart
+ * from routing/animation concerns, tied together only by the event id. */
+const applyFieldsBlock = (raw: unknown, events: AnimatedEventSpec[]): void => {
+  if (raw === undefined) {
+    return;
+  }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new Error(
+      'animate frontmatter requires `fields` to be a mapping of event id to a list of UML ' +
+        'member strings, e.g.\nfields:\n  user-created:\n    - "+username: string"'
+    );
+  }
+  const eventsById = new Map(events.map((event) => [event.id, event]));
+  for (const [eventId, rawFields] of Object.entries(raw)) {
+    const event = eventsById.get(eventId);
+    if (!event) {
+      throw new Error(
+        `animate frontmatter: \`fields.${eventId}\` references no declared event ` +
+          `(known ids: ${events.map((e) => `\`${e.id}\``).join(', ')})`
+      );
+    }
+    if (!Array.isArray(rawFields) || rawFields.length === 0) {
+      throw new Error(
+        `animate frontmatter requires \`fields.${eventId}\` to be a non-empty list of UML member strings`
+      );
+    }
+    event.fields = rawFields.map((rawField, i) =>
+      parseUmlField(rawField, `fields.${eventId}[${i}]`)
+    );
+  }
+};
+
 /**
  * Validates the raw `animate:` frontmatter value into a list of event specs, failing loudly
  * (with the offending field's path) rather than guessing — same philosophy as the distsys
@@ -226,7 +294,7 @@ export function parseAnimateSpec(raw: unknown): AnimatedEventSpec[] {
   }
 
   const seenIds = new Set<string>();
-  return events.map((rawEvent, index) => {
+  const parsed = events.map((rawEvent, index) => {
     if (!rawEvent || typeof rawEvent !== 'object' || Array.isArray(rawEvent)) {
       throw new Error(`animate frontmatter requires \`events[${index}]\` to be a mapping`);
     }
@@ -304,10 +372,14 @@ export function parseAnimateSpec(raw: unknown): AnimatedEventSpec[] {
       color,
       interval,
       travelDuration,
-      showPath: (node.showPath) ?? true,
+      showPath: node.showPath ?? true,
       on: { from, to, message, nth },
+      fields: [],
     };
   });
+
+  applyFieldsBlock((raw as { fields?: unknown }).fields, parsed);
+  return parsed;
 }
 
 const describeTargets = (targets: AnimatedEventTarget[]): string =>
@@ -365,6 +437,14 @@ export interface BoundAnimatedEvent {
   selector: string;
 }
 
+/** Legend data exposed on `svgEl.distSys.legend` so host pages can describe the streams —
+ * event id, the color the orb actually renders with, and any declared payload fields. */
+export interface AnimatedEventLegendEntry {
+  id: string;
+  color: string;
+  fields: AnimatedEventField[];
+}
+
 /**
  * Attaches every resolved event's animation to the live (inserted-into-the-page) SVG and
  * exposes the same `svgEl.distSys` aggregate controller the distsys diagram uses — play/pause/
@@ -407,8 +487,19 @@ export function attachAnimatedEvents(element: Element, bound: BoundAnimatedEvent
     });
   });
 
+  // Everything a host page needs to render a legend for the streams: one entry per event, in
+  // declaration order, with the color already resolved to what the orb actually uses.
+  const legend: AnimatedEventLegendEntry[] = bound.map(({ event }) => ({
+    id: event.id,
+    color: event.color ?? DEFAULT_TOKEN_FILL,
+    fields: event.fields,
+  }));
+
   const controllerList = Object.values(controllersById);
-  const aggregate: TokenAnimationController & { events: typeof controllersById } = {
+  const aggregate: TokenAnimationController & {
+    events: typeof controllersById;
+    legend: AnimatedEventLegendEntry[];
+  } = {
     play() {
       controllerList.forEach((c) => c.play());
     },
@@ -427,6 +518,7 @@ export function attachAnimatedEvents(element: Element, bound: BoundAnimatedEvent
       return nowVisible;
     },
     events: controllersById,
+    legend,
   };
   (svgEl as unknown as { distSys: typeof aggregate }).distSys = aggregate;
   aggregate.play();

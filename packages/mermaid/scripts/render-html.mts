@@ -175,11 +175,68 @@ function buildHtml(options: {
   }
   .controls button:hover { border-color: var(--accent-2); color: var(--accent-2); }
   .controls button:focus-visible { outline: 2px solid var(--accent-2); outline-offset: 2px; }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    max-width: 100%;
+  }
+  .legend[hidden] { display: none; }
+  .legend details {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    min-width: 180px;
+  }
+  .legend summary {
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 12px;
+    letter-spacing: 0.03em;
+    user-select: none;
+  }
+  .legend summary::-webkit-details-marker { display: none; }
+  .legend summary::after {
+    content: "\\25B8";
+    margin-left: auto;
+    color: var(--text-dim);
+    transition: transform 0.15s ease;
+  }
+  .legend details[open] summary::after { transform: rotate(90deg); }
+  .legend .swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .legend ul {
+    margin: 0;
+    padding: 2px 12px 10px 30px;
+    list-style: none;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .legend li { padding: 2px 0; white-space: nowrap; }
+  .legend .vis { color: var(--accent-2); font-weight: 600; }
+  .legend .field-type { color: var(--text-dim); }
+  .legend .no-fields {
+    padding: 2px 12px 10px 30px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+  }
 </style>
 </head>
 <body>
   <div class="panel">
     <div id="mount"></div>
+    <div class="legend" id="legend" hidden></div>
     <div class="controls" id="controls" hidden>
       <button type="button" id="btnPlay">&#9654; play</button>
       <button type="button" id="btnPause">&#10073;&#10073; pause</button>
@@ -222,6 +279,51 @@ ${bundleSource}
       document.getElementById("btnTogglePath").addEventListener("click", function () {
         svgEl.distSys.togglePath();
       });
+      // Legend: one collapsible box per animated event; expanding it lists the event's
+      // declared payload fields in UML member notation. Built entirely with textContent, so
+      // nothing from the diagram source is ever interpreted as HTML.
+      var legend = svgEl.distSys.legend;
+      if (legend && legend.length) {
+        var legendEl = document.getElementById("legend");
+        legendEl.hidden = false;
+        legend.forEach(function (entry) {
+          var details = document.createElement("details");
+          var summary = document.createElement("summary");
+          var swatch = document.createElement("span");
+          swatch.className = "swatch";
+          swatch.style.background = entry.color;
+          summary.appendChild(swatch);
+          summary.appendChild(document.createTextNode(entry.id));
+          details.appendChild(summary);
+          if (entry.fields.length) {
+            var list = document.createElement("ul");
+            entry.fields.forEach(function (field) {
+              var item = document.createElement("li");
+              if (field.visibility) {
+                var vis = document.createElement("span");
+                vis.className = "vis";
+                vis.textContent = field.visibility;
+                item.appendChild(vis);
+              }
+              item.appendChild(document.createTextNode(field.name));
+              if (field.type) {
+                var fieldType = document.createElement("span");
+                fieldType.className = "field-type";
+                fieldType.textContent = ": " + field.type;
+                item.appendChild(fieldType);
+              }
+              list.appendChild(item);
+            });
+            details.appendChild(list);
+          } else {
+            var empty = document.createElement("div");
+            empty.className = "no-fields";
+            empty.textContent = "no fields declared";
+            details.appendChild(empty);
+          }
+          legendEl.appendChild(details);
+        });
+      }
     }
   }).catch(function (err) {
     document.getElementById("mount").textContent = "Render error: " + (err && err.message ? err.message : err);
