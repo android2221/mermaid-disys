@@ -523,8 +523,10 @@ const render = async function (
 
   try {
     diag = injected.profiling
-      ? await profiler.span('parse', () => Diagram.fromText(text, { title: processed.title }))
-      : await Diagram.fromText(text, { title: processed.title });
+      ? await profiler.span('parse', () =>
+          Diagram.fromText(text, { title: processed.title, animate: processed.animate })
+        )
+      : await Diagram.fromText(text, { title: processed.title, animate: processed.animate });
   } catch (error) {
     if (config.suppressErrorRendering) {
       removeTempElements();
@@ -659,9 +661,12 @@ function initialize(userOptions: MermaidConfig = {}) {
   addDiagrams();
 }
 
-const getDiagramFromText = (text: string, metadata: Pick<DiagramMetadata, 'title'> = {}) => {
-  const { code } = preprocessDiagram(text);
-  return Diagram.fromText(code, metadata);
+const getDiagramFromText = (
+  text: string,
+  metadata: Pick<DiagramMetadata, 'title' | 'animate'> = {}
+) => {
+  const { code, animate } = preprocessDiagram(text);
+  return Diagram.fromText(code, { animate, ...metadata });
 };
 
 /**

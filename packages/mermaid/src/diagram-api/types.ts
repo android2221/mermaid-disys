@@ -8,6 +8,9 @@ import type { DiagramOrientation } from '../diagrams/git/gitGraphTypes.js';
 export interface DiagramMetadata {
   title?: string;
   config?: MermaidConfig;
+  /** Raw `animate:` frontmatter (animated-event orbs riding existing lines); handed to the
+   * diagram db untouched and validated by whichever renderer consumes it. */
+  animate?: unknown;
 }
 
 export interface InjectUtils {
@@ -41,6 +44,11 @@ export interface DiagramDB {
   setDisplayMode?: (title: string) => void;
   setDiagramId?: (svgElementId: string) => void;
   bindFunctions?: (element: Element) => void;
+  /** Stores the raw `animate:` frontmatter for the renderer to validate and consume. Called on
+   * every parse (with `undefined` when the frontmatter has no `animate` block) so a previous
+   * diagram's spec can never leak into the next render. */
+  setAnimateSpec?: (spec: unknown) => void;
+  getAnimateSpec?: () => unknown;
 }
 
 /**

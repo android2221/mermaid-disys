@@ -128,6 +128,11 @@ export class SequenceDB implements DiagramDB {
     lastDestroyed: undefined,
   }));
 
+  /** Raw `animate:` frontmatter for this parse; the renderer validates it, resolves each event
+   * to a message line, and installs `bindFunctions` to start the orbs on the live svg. */
+  private animateSpec: unknown = undefined;
+  public bindFunctions?: (element: Element) => void;
+
   constructor() {
     // Needed for JISON since it only supports direct properties
     this.apply = this.apply.bind(this);
@@ -374,7 +379,17 @@ export class SequenceDB implements DiagramDB {
 
   public clear() {
     this.state.reset();
+    this.animateSpec = undefined;
+    this.bindFunctions = undefined;
     commonClear();
+  }
+
+  public setAnimateSpec(spec: unknown) {
+    this.animateSpec = spec;
+  }
+
+  public getAnimateSpec() {
+    return this.animateSpec;
   }
 
   public parseMessage(str: string) {

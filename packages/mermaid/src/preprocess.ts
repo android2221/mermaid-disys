@@ -18,7 +18,7 @@ const cleanupText = (code: string) => {
 
 const processFrontmatter = (code: string) => {
   const { text, metadata } = extractFrontMatter(code);
-  const { displayMode, title, config = {} } = metadata;
+  const { displayMode, title, config = {}, animate } = metadata;
   if (displayMode) {
     // Needs to be supported for legacy reasons
     if (!config.gantt) {
@@ -27,7 +27,7 @@ const processFrontmatter = (code: string) => {
     config.gantt.displayMode = displayMode;
   }
 
-  return { title, config, text };
+  return { title, config, text, animate };
 };
 
 const processDirectives = (code: string) => {
@@ -60,5 +60,6 @@ export function preprocessDiagram(code: string) {
     code,
     title: frontMatterResult.title,
     config,
+    animate: frontMatterResult.animate,
   } satisfies DiagramMetadata & { code: string };
 }

@@ -8,6 +8,9 @@ interface FrontMatterMetadata {
   // Allows custom display modes. Currently used for compact mode in gantt charts.
   displayMode?: GanttDiagramConfig['displayMode'];
   config?: MermaidConfig;
+  /** Animated-event spec (orbs riding existing lines); validated later by parseAnimateSpec,
+   * in the renderer of whichever diagram type consumes it. */
+  animate?: unknown;
 }
 
 export interface FrontMatterResult {
@@ -60,6 +63,9 @@ export function extractFrontMatter(text: string): FrontMatterResult {
   }
   if (parsed.config) {
     metadata.config = parsed.config;
+  }
+  if (parsed.animate !== undefined) {
+    metadata.animate = parsed.animate;
   }
 
   return {

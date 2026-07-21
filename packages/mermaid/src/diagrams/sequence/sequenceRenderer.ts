@@ -11,6 +11,11 @@ import utils from '../../utils.js';
 import { configureSvgSize } from '../../setupGraphViewbox.js';
 import type { Diagram } from '../../Diagram.js';
 import { PARTICIPANT_TYPE } from './sequenceDb.js';
+import {
+  attachAnimatedEvents,
+  parseAnimateSpec,
+  resolveAnimatedEventTarget,
+} from '../../rendering-util/animatedEvents.js';
 
 let conf = {};
 
@@ -1469,6 +1474,29 @@ export const draw = async function (_text: string, id: string, _version: string,
       ' ' +
       (height + extraVertForTitle + extraHeightForNeoActors)
   );
+
+  // `animate:` frontmatter: resolve each declared event to one drawn message line now (so a
+  // bad spec fails the render loudly, with the message list in the error), then hand the
+  // animation attach off to bindFunctions — the svg gets serialized and re-mounted by the
+  // caller, so only selectors survive to bind time, not element references.
+  const animateRaw = diagObj.db.getAnimateSpec?.();
+  if (animateRaw !== undefined) {
+    const events = parseAnimateSpec(animateRaw);
+    // Every drawn message line carries data-id="i<msg.id>" (see drawMessage), so resolving
+    // against messagesToDraw both restricts matching to real lines (never notes or control
+    // frames) and yields a selector that can't drift from the DOM.
+    const targets = messagesToDraw.map(({ msg }) => ({
+      id: String(msg.id),
+      from: msg.from,
+      to: msg.to,
+      text: String(msg.message ?? ''),
+    }));
+    const boundEvents = events.map((event) => ({
+      event,
+      selector: `[data-id="i${resolveAnimatedEventTarget(event, targets).id}"]`,
+    }));
+    diagObj.db.bindFunctions = (element: Element) => attachAnimatedEvents(element, boundEvents);
+  }
 
   log.debug(`models:`, bounds.models);
 };

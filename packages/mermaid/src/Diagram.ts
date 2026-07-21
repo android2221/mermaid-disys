@@ -14,7 +14,10 @@ export type ParseErrorFunction = (err: string | DetailedError | unknown, hash?: 
  * @privateRemarks This is exported as part of the public mermaidAPI.
  */
 export class Diagram {
-  public static async fromText(text: string, metadata: Pick<DiagramMetadata, 'title'> = {}) {
+  public static async fromText(
+    text: string,
+    metadata: Pick<DiagramMetadata, 'title' | 'animate'> = {}
+  ) {
     const config = configApi.getConfig();
     const type = detectType(text, config);
     text = encodeEntities(text) + '\n';
@@ -41,6 +44,9 @@ export class Diagram {
     if (metadata.title) {
       db.setDiagramTitle?.(metadata.title);
     }
+    // Always set (even when undefined) so a previous parse's animate spec can't leak into a
+    // diagram whose frontmatter has no `animate` block.
+    db.setAnimateSpec?.(metadata.animate);
     await parser.parse(text);
     return new Diagram(type, text, db, parser, renderer);
   }
