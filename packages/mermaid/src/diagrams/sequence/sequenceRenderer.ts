@@ -14,7 +14,7 @@ import { PARTICIPANT_TYPE } from './sequenceDb.js';
 import {
   attachAnimatedEvents,
   parseAnimateSpec,
-  resolveAnimatedEventTarget,
+  resolveAnimatedEventTargets,
 } from '../../rendering-util/animatedEvents.js';
 
 let conf = {};
@@ -1475,9 +1475,9 @@ export const draw = async function (_text: string, id: string, _version: string,
       (height + extraVertForTitle + extraHeightForNeoActors)
   );
 
-  // `animate:` frontmatter: resolve each declared event to one drawn message line now (so a
-  // bad spec fails the render loudly, with the message list in the error), then hand the
-  // animation attach off to bindFunctions — the svg gets serialized and re-mounted by the
+  // `animate:` frontmatter: resolve each declared event's pathway(s) to drawn message lines
+  // now (so a bad spec fails the render loudly, with the message list in the error), then hand
+  // the animation attach off to bindFunctions — the svg gets serialized and re-mounted by the
   // caller, so only selectors survive to bind time, not element references.
   const animateRaw = diagObj.db.getAnimateSpec?.();
   if (animateRaw !== undefined) {
@@ -1493,7 +1493,9 @@ export const draw = async function (_text: string, id: string, _version: string,
     }));
     const boundEvents = events.map((event) => ({
       event,
-      selector: `[data-id="i${resolveAnimatedEventTarget(event, targets).id}"]`,
+      selectors: resolveAnimatedEventTargets(event, targets).map(
+        (target) => `[data-id="i${target.id}"]`
+      ),
     }));
     diagObj.db.bindFunctions = (element: Element) => attachAnimatedEvents(element, boundEvents);
   }

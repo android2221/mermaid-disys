@@ -194,7 +194,10 @@ export interface AnimatedEventSpec {
   interval: number;
   travelDuration: number;
   showPath: boolean;
-  on: AnimatedEventOn;
+  /** The pathways this event travels — one entry per line it rides. Declared in frontmatter as
+   * either a single mapping or a list of them (an event fanning out to several consumers is
+   * still one event; the payload doesn't change per consumer). */
+  on: AnimatedEventOn[];
   /** Payload fields declared in the `animate.fields` block (keyed by this event's id). */
   fields: AnimatedEventField[];
 }
@@ -340,32 +343,47 @@ export function parseAnimateSpec(raw: unknown): AnimatedEventSpec[] {
       throw new Error(`animate frontmatter requires \`events[${index}].showPath\` to be a boolean`);
     }
 
+    // `on` is one pathway mapping, or a list of them for an event that travels several lines
+    // (produced once, consumed by several services). Every pathway shares the event's color,
+    // timing, and payload fields — the event is the identity, the pathways are just hops.
     const on = node.on;
-    if (!on || typeof on !== 'object' || Array.isArray(on)) {
+    const rawPathways = Array.isArray(on) ? on : [on];
+    if (Array.isArray(on) && on.length === 0) {
       throw new Error(
-        `animate frontmatter requires \`events[${index}].on\` to be a mapping naming the line ` +
-          'to animate, e.g. `on: { from: api, to: hub }`'
+        `animate frontmatter requires \`events[${index}].on\` to be a non-empty list when given as a list`
       );
     }
-    const onNode = on as Record<string, unknown>;
-    const from = requireOptionalString(onNode.from, `events[${index}].on.from`);
-    const to = requireOptionalString(onNode.to, `events[${index}].on.to`);
-    const message = requireOptionalString(onNode.message, `events[${index}].on.message`);
-    let nth: number | undefined;
-    if (onNode.nth !== undefined && onNode.nth !== null) {
-      nth = Number(onNode.nth);
-      if (!Number.isInteger(nth) || nth < 1) {
+    const pathways = rawPathways.map((rawPathway, onIndex) => {
+      // Error paths keep the plain `on.` form when the user wrote a single mapping, so the
+      // message matches what they typed.
+      const path = Array.isArray(on) ? `events[${index}].on[${onIndex}]` : `events[${index}].on`;
+      if (!rawPathway || typeof rawPathway !== 'object' || Array.isArray(rawPathway)) {
         throw new Error(
-          `animate frontmatter requires \`events[${index}].on.nth\` to be a positive integer (1-based)`
+          `animate frontmatter requires \`${path}\` to be a mapping naming the line ` +
+            'to animate, e.g. `{ from: api, to: hub }`'
         );
       }
-    }
-    if (from === undefined && to === undefined && message === undefined && nth === undefined) {
-      throw new Error(
-        `animate frontmatter requires \`events[${index}].on\` to set at least one of ` +
-          '`from`, `to`, `message`, `nth`'
-      );
-    }
+      const onNode = rawPathway as Record<string, unknown>;
+      const from = requireOptionalString(onNode.from, `${path}.from`);
+      const to = requireOptionalString(onNode.to, `${path}.to`);
+      const message = requireOptionalString(onNode.message, `${path}.message`);
+      let nth: number | undefined;
+      if (onNode.nth !== undefined && onNode.nth !== null) {
+        nth = Number(onNode.nth);
+        if (!Number.isInteger(nth) || nth < 1) {
+          throw new Error(
+            `animate frontmatter requires \`${path}.nth\` to be a positive integer (1-based)`
+          );
+        }
+      }
+      if (from === undefined && to === undefined && message === undefined && nth === undefined) {
+        throw new Error(
+          `animate frontmatter requires \`${path}\` to set at least one of ` +
+            '`from`, `to`, `message`, `nth`'
+        );
+      }
+      return { from, to, message, nth };
+    });
 
     return {
       id,
@@ -373,7 +391,7 @@ export function parseAnimateSpec(raw: unknown): AnimatedEventSpec[] {
       interval,
       travelDuration,
       showPath: node.showPath ?? true,
-      on: { from, to, message, nth },
+      on: pathways,
       fields: [],
     };
   });
@@ -386,16 +404,17 @@ const describeTargets = (targets: AnimatedEventTarget[]): string =>
   targets.map((t) => `\`${t.from ?? '?'} -> ${t.to ?? '?'}: ${t.text}\``).join(', ');
 
 /**
- * Picks the one line an event rides from the diagram's candidate list. Filters are applied in
- * confidence order — from/to, then exact label text, then `nth` as the last-resort tiebreak —
- * and ambiguity is an error (listing the contenders) rather than a silent first-match, so an
- * orb can never quietly animate the wrong line.
+ * Picks the one line a single pathway rides from the diagram's candidate list. Filters are
+ * applied in confidence order — from/to, then exact label text, then `nth` as the last-resort
+ * tiebreak — and ambiguity is an error (listing the contenders) rather than a silent
+ * first-match, so an orb can never quietly animate the wrong line.
  */
-export function resolveAnimatedEventTarget(
-  event: AnimatedEventSpec,
+const resolveOnePathway = (
+  label: string,
+  pathway: AnimatedEventOn,
   targets: AnimatedEventTarget[]
-): AnimatedEventTarget {
-  const { from, to, message, nth } = event.on;
+): AnimatedEventTarget => {
+  const { from, to, message, nth } = pathway;
   let matches = targets;
   if (from !== undefined) {
     matches = matches.filter((t) => t.from === from);
@@ -409,14 +428,14 @@ export function resolveAnimatedEventTarget(
 
   if (matches.length === 0) {
     throw new Error(
-      `animate: event \`${event.id}\` matched no line ` +
+      `animate: ${label} matched no line ` +
         `(available: ${targets.length ? describeTargets(targets) : 'none'})`
     );
   }
   if (nth !== undefined) {
     if (nth > matches.length) {
       throw new Error(
-        `animate: event \`${event.id}\` asks for \`nth: ${nth}\` but only ${matches.length} ` +
+        `animate: ${label} asks for \`nth: ${nth}\` but only ${matches.length} ` +
           `line(s) match: ${describeTargets(matches)}`
       );
     }
@@ -424,17 +443,36 @@ export function resolveAnimatedEventTarget(
   }
   if (matches.length > 1) {
     throw new Error(
-      `animate: event \`${event.id}\` matches ${matches.length} lines: ` +
+      `animate: ${label} matches ${matches.length} lines: ` +
         `${describeTargets(matches)} — add \`message:\` (the line's label) or \`nth:\` to pick one`
     );
   }
   return matches[0];
+};
+
+/**
+ * Resolves every pathway of an event to its line, in declaration order. Multi-pathway events
+ * get the pathway index in any error — "pathway 2 (on[1])" — so the offending entry is
+ * findable at a glance.
+ */
+export function resolveAnimatedEventTargets(
+  event: AnimatedEventSpec,
+  targets: AnimatedEventTarget[]
+): AnimatedEventTarget[] {
+  return event.on.map((pathway, i) => {
+    const label =
+      event.on.length === 1
+        ? `event \`${event.id}\``
+        : `event \`${event.id}\` pathway ${i + 1} (\`on[${i}]\`)`;
+    return resolveOnePathway(label, pathway, targets);
+  });
 }
 
 export interface BoundAnimatedEvent {
   event: AnimatedEventSpec;
-  /** CSS selector, scoped to the rendered svg, for the line this event rides. */
-  selector: string;
+  /** CSS selectors, scoped to the rendered svg, for the lines this event rides — one per
+   * pathway, in `on` declaration order. */
+  selectors: string[];
 }
 
 /** Legend data exposed on `svgEl.distSys.legend` so host pages can describe the streams —
@@ -448,8 +486,9 @@ export interface AnimatedEventLegendEntry {
 /**
  * Attaches every resolved event's animation to the live (inserted-into-the-page) SVG and
  * exposes the same `svgEl.distSys` aggregate controller the distsys diagram uses — play/pause/
- * stop/setPathVisible/togglePath across all events at once, plus `.events[id]` for one stream —
- * so existing hosts (like the render:html control bar) work unchanged.
+ * stop/setPathVisible/togglePath across all streams at once, plus `.events['id[pathwayIndex]']`
+ * for one stream (keyed the same way distsys keys its per-route controllers) — so existing
+ * hosts (like the render:html control bar) work unchanged.
  *
  * Orb and line colors are set inline rather than via stylesheet classes, because the host
  * diagram's `<style>` block knows nothing about animation tokens.
@@ -462,28 +501,31 @@ export function attachAnimatedEvents(element: Element, bound: BoundAnimatedEvent
     return;
   }
   const controllersById: Record<string, TokenAnimationController> = {};
-  bound.forEach(({ event, selector }) => {
-    const line = svgEl.querySelector<SVGGeometryElement>(selector);
-    if (!line) {
-      controllersById[event.id] = NOOP_TOKEN_ANIMATION;
-      return;
-    }
-    if (event.color) {
-      line.style.stroke = event.color;
-    }
-    const tokenGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-    tokenGroup.setAttribute('class', 'animated-event-tokens');
-    tokenGroup.style.fill = event.color ?? DEFAULT_TOKEN_FILL;
-    tokenGroup.style.stroke = event.color ?? DEFAULT_TOKEN_STROKE;
-    svgEl.appendChild(tokenGroup);
-    controllersById[event.id] = attachTokenAnimation({
-      path: line,
-      tokenGroup,
-      interval: event.interval,
-      travelDuration: event.travelDuration,
-      tokenRadius: DEFAULT_TOKEN_RADIUS,
-      tokenClass: 'animated-event-token',
-      pathVisible: event.showPath,
+  bound.forEach(({ event, selectors }) => {
+    selectors.forEach((selector, pathwayIndex) => {
+      const key = `${event.id}[${pathwayIndex}]`;
+      const line = svgEl.querySelector<SVGGeometryElement>(selector);
+      if (!line) {
+        controllersById[key] = NOOP_TOKEN_ANIMATION;
+        return;
+      }
+      if (event.color) {
+        line.style.stroke = event.color;
+      }
+      const tokenGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+      tokenGroup.setAttribute('class', 'animated-event-tokens');
+      tokenGroup.style.fill = event.color ?? DEFAULT_TOKEN_FILL;
+      tokenGroup.style.stroke = event.color ?? DEFAULT_TOKEN_STROKE;
+      svgEl.appendChild(tokenGroup);
+      controllersById[key] = attachTokenAnimation({
+        path: line,
+        tokenGroup,
+        interval: event.interval,
+        travelDuration: event.travelDuration,
+        tokenRadius: DEFAULT_TOKEN_RADIUS,
+        tokenClass: 'animated-event-token',
+        pathVisible: event.showPath,
+      });
     });
   });
 

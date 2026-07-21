@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   parseAnimateSpec,
-  resolveAnimatedEventTarget,
+  resolveAnimatedEventTargets,
   type AnimatedEventTarget,
 } from './animatedEvents.js';
 
@@ -14,7 +14,7 @@ describe('parseAnimateSpec', () => {
       interval: 1000,
       travelDuration: 900,
       showPath: true,
-      on: { from: 'api', to: 'hub' },
+      on: [{ from: 'api', to: 'hub' }],
     });
   });
 
@@ -90,6 +90,33 @@ describe('parseAnimateSpec', () => {
     expect(() => parseAnimateSpec({ events: [{ on: { nth: 0 } }] })).toThrow(/positive integer/);
     expect(() => parseAnimateSpec({ events: [{ on: { nth: 1.5 } }] })).toThrow(/positive integer/);
   });
+
+  it('accepts `on` as a list of pathways sharing the event identity', () => {
+    const events = parseAnimateSpec({
+      events: [
+        {
+          id: 'user-created',
+          on: [
+            { from: 'api', to: 'hub' },
+            { from: 'hub', to: 'mailer' },
+          ],
+        },
+      ],
+    });
+    expect(events[0].on).toEqual([
+      { from: 'api', to: 'hub', message: undefined, nth: undefined },
+      { from: 'hub', to: 'mailer', message: undefined, nth: undefined },
+    ]);
+  });
+
+  it('rejects an empty `on` list and validates entries with their index', () => {
+    expect(() => parseAnimateSpec({ events: [{ on: [] }] })).toThrow(
+      /`events\[0].on` to be a non-empty list/
+    );
+    expect(() => parseAnimateSpec({ events: [{ on: [{ from: 'a' }, {}] }] })).toThrow(
+      /`events\[0].on\[1]` to set at least one of/
+    );
+  });
 });
 
 describe('parseAnimateSpec fields block', () => {
@@ -154,7 +181,7 @@ describe('parseAnimateSpec fields block', () => {
   });
 });
 
-describe('resolveAnimatedEventTarget', () => {
+describe('resolveAnimatedEventTargets', () => {
   const targets: AnimatedEventTarget[] = [
     { id: '0', from: 'user', to: 'api', text: 'POST /users' },
     { id: '1', from: 'api', to: 'user', text: '201 Created' },
@@ -166,38 +193,38 @@ describe('resolveAnimatedEventTarget', () => {
   const eventWith = (on: object) => parseAnimateSpec({ events: [{ id: 'e', on } as object] })[0];
 
   it('resolves a unique from/to pair', () => {
-    expect(resolveAnimatedEventTarget(eventWith({ from: 'user', to: 'api' }), targets).id).toBe(
+    expect(resolveAnimatedEventTargets(eventWith({ from: 'user', to: 'api' }), targets)[0].id).toBe(
       '0'
     );
   });
 
   it('errors listing candidates when from/to is ambiguous', () => {
     expect(() =>
-      resolveAnimatedEventTarget(eventWith({ from: 'api', to: 'hub' }), targets)
+      resolveAnimatedEventTargets(eventWith({ from: 'api', to: 'hub' }), targets)
     ).toThrow(/matches 3 lines: .*UserCreated.*AuditLogged.* — add `message:`/);
   });
 
   it('disambiguates by message text', () => {
     expect(
-      resolveAnimatedEventTarget(
+      resolveAnimatedEventTargets(
         eventWith({ from: 'api', to: 'hub', message: 'AuditLogged' }),
         targets
-      ).id
+      )[0].id
     ).toBe('4');
   });
 
   it('uses nth as the final tiebreak when even the text repeats', () => {
     expect(
-      resolveAnimatedEventTarget(
+      resolveAnimatedEventTargets(
         eventWith({ from: 'api', to: 'hub', message: 'UserCreated', nth: 2 }),
         targets
-      ).id
+      )[0].id
     ).toBe('3');
   });
 
   it('errors when text alone still matches several lines and no nth is given', () => {
     expect(() =>
-      resolveAnimatedEventTarget(
+      resolveAnimatedEventTargets(
         eventWith({ from: 'api', to: 'hub', message: 'UserCreated' }),
         targets
       )
@@ -205,14 +232,28 @@ describe('resolveAnimatedEventTarget', () => {
   });
 
   it('errors when nothing matches, listing what exists', () => {
-    expect(() => resolveAnimatedEventTarget(eventWith({ from: 'nope' }), targets)).toThrow(
+    expect(() => resolveAnimatedEventTargets(eventWith({ from: 'nope' }), targets)).toThrow(
       /matched no line \(available: .*POST \/users/
     );
   });
 
   it('errors when nth exceeds the match count', () => {
     expect(() =>
-      resolveAnimatedEventTarget(eventWith({ from: 'api', to: 'hub', nth: 9 }), targets)
+      resolveAnimatedEventTargets(eventWith({ from: 'api', to: 'hub', nth: 9 }), targets)
     ).toThrow(/asks for `nth: 9` but only 3/);
+  });
+  it('resolves every pathway of a multi-pathway event, in declaration order', () => {
+    const event = eventWith([
+      { from: 'user', to: 'api' },
+      { from: 'api', to: 'hub', message: 'AuditLogged' },
+    ]);
+    expect(resolveAnimatedEventTargets(event, targets).map((t) => t.id)).toEqual(['0', '4']);
+  });
+
+  it('names the failing pathway in a multi-pathway error', () => {
+    const event = eventWith([{ from: 'user', to: 'api' }, { from: 'ghost' }]);
+    expect(() => resolveAnimatedEventTargets(event, targets)).toThrow(
+      /event `e` pathway 2 \(`on\[1]`\) matched no line/
+    );
   });
 });

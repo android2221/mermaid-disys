@@ -4,28 +4,25 @@ animate:
     - id: user-created
       color: "#3b82f6"
       interval: 600
-      on: { from: api, to: hub }
-    - id: user-created-delivery
-      color: "#3b82f6"
-      interval: 600
-      on: { from: hub, to: mailer }
+      on:
+        - { from: api, to: hub }
+        - { from: hub, to: mailer }
+        - { from: hub, to: analytics }
   fields:
     user-created:
       - "+username: string"
       - "+email: string"
       - "-passwordHash: string"
-    user-created-delivery:
-      - "+username: string"
-      - "+email: string"
-      - "+deliveredAt: Date"
 ---
 sequenceDiagram
   actor user as User
   participant api as User API
   participant hub as Event Hub
   participant mailer as Welcome Email Service
+  participant analytics as Analytics Service
   user->>api: POST /users
   api-->>user: 201 Created
   api->>hub: UserCreated
   hub->>mailer: UserCreated
+  hub->>analytics: UserCreated
   mailer->>mailer: send welcome email
